@@ -100,6 +100,11 @@ internal sealed unsafe class NativeAiBridge
     internal bool Active => active;
     internal bool ModelsEnabled => active && started && models;
     internal int Seat(uint playerId) => active && seats.TryGetValue(playerId, out int seat) ? seat : 0;
+    internal string ModelName(uint playerId)
+    {
+        int seat = ModelsEnabled ? Seat(playerId) : 0;
+        return seat > 0 && seat <= config.AIs.Count ? config.AIs[seat - 1].Model : "";
+    }
     internal uint[] ControlledPlayers() => ModelsEnabled ? seats.Keys.ToArray() : Array.Empty<uint>();
     IntPtr ChatSession()
     {

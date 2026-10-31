@@ -6,10 +6,8 @@ if (args.Length == 2 && args[0] == "--rules-snapshot") { RulesSnapshotChecks.Run
 if (args.Contains("--native-seats")) { NativeAiSeatChecks.Run(); return; }
 if (args.Contains("--action-plan")) { await ActionPlanChecks.Run(); return; }
 if (args.Contains("--communication")) { await CommunicationChecks.Run(); return; }
-SpectatorChecks.Run();
 if (args.Contains("--provider-connections")) { await ProviderConnectionChecks.Run(); return; }
 await ProviderConnectionChecks.Run();
-VirtualChecks.Run();
 Files.Root = Path.Combine(Path.GetTempPath(), "tohotopia-check-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(Files.Root);
 RoomFileChecks.Run(Files.Root);

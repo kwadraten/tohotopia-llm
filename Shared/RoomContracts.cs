@@ -85,14 +85,6 @@ public record RoomConfig
         get; init;
     }
     public List<AISeat> AIs { get; init; } = new() { new() { Civilization = 0 }, new() { Civilization = 1 } };
-    public List<RoomPlayer> Players()
-    {
-        var players = new List<RoomPlayer>();
-        if (!SpectatorMode) players.Add(new(0, 0, HumanCivilization, HumanTeamId));
-        for (int i = 0; i < AIs.Count; i++)
-            players.Add(new(players.Count, i + 1, AIs[i].Civilization, AIs[i].TeamId));
-        return players;
-    }
     public void Validate()
     {
         if (NativeLobby && (SpectatorMode || AIs.Count > 4))
@@ -126,7 +118,6 @@ public record VisibleSnapshot(string SessionId, uint MapId, uint PlayerId, DateT
         SessionId == session && MapId == map && PlayerId == player
         && CapturedAt <= now.AddSeconds(2) && CapturedAt >= now.AddSeconds(-20);
 }
-public record RoomPlayer(int Index, int ModelSeat, uint Civilization, int TeamId);
 public record RoomStatus(string State, string Message, bool Joined = false, bool Started = false, uint MapId = 0, uint HumanPlayerId = 0, int AIPlayers = 0, int NetMode = 0, bool ModelsEnabled = false, bool SpectatorMode = false);
 public static class RoomFiles
 {

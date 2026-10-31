@@ -66,9 +66,8 @@ public partial class Battle : MonoBehaviour
                 if (activeMap != IntPtr.Zero && activeMap == previousMap)
                 {
                     var activePlayer = N.Call(activeMap, "get_ivn");
-                    Pause(room.NativeLobbyActive
-                        ? activePlayer != IntPtr.Zero && room.Seat(N.Id(activePlayer)) > 0 && !turnFallback.IsNative(N.Id(activePlayer), N.Get<uint>(activePlayer, "Turn"))
-                        : activePlayer == IntPtr.Zero || !turnFallback.IsNative(N.Id(activePlayer), N.Get<uint>(activePlayer, "Turn")));
+                    Pause(activePlayer != IntPtr.Zero && room.Seat(N.Id(activePlayer)) > 0
+                        && !turnFallback.IsNative(N.Id(activePlayer), N.Get<uint>(activePlayer, "Turn")));
                 }
             }
             if (Time.realtimeSinceStartup < next)
