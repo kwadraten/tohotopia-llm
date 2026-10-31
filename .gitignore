@@ -1,0 +1,18 @@
+# .NET build output and IDE state
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+
+# Local build, investigation, and validation output
+/dist/
+/work/
+/validation/
+/research/
+*.log
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example

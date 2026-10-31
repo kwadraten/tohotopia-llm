@@ -1,0 +1,7 @@
+Microsoft Agent Framework: https://github.com/microsoft/agent-framework (MIT).
+Grok OAuth protocol verified against https://github.com/anomalyco/opencode/blob/dev/packages/core/src/plugin/provider/xai.ts and https://github.com/xai-org/grok-build (MIT / Apache-2.0; see upstream licenses).
+Kimi OAuth protocol verified against https://github.com/MoonshotAI/kimi-cli/blob/main/src/kimi_cli/auth/oauth.py (Apache-2.0). No Python execution is used by this project.
+IL2CppSharp: https://github.com/SNWCreations/IL2CppSharp. Included library license in Mod/lib.
+BepInEx uses the locally installed HybridCLR-compatible Il2CppInterop.Runtime build. See https://github.com/SNWCreations/Il2CppInterop (LGPL-3.0).
+FSharp.ModelsDev 0.1.0: https://github.com/kwadraten/FSharp.ModelsDev (MIT). Used for the OpenAI Responses chat client and embedded Models.dev catalog; OAuth and encrypted token storage remain host-provided.
+Anthropic browser PKCE reference: https://github.com/ex-machina-co/opencode-anthropic-auth/blob/main/src/auth.ts. Only authorization protocol is referenced; no client impersonation, billing fingerprint, or attestation is used.

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup><Compile Include="..\AgentHost\Models.cs" Link="Models.cs" /></ItemGroup>
+
+<ItemGroup><Compile Include="..\Shared\RoomContracts.cs" Link="RoomContracts.cs" /><Compile Include="..\Shared\AgentEvents.cs" Link="AgentEvents.cs" /></ItemGroup></Project>
+

@@ -1,0 +1,9 @@
+{
+  "provider": "openai",
+  "model": "",
+  "reasoning": "default",
+  "mapFormat": "table",
+  "timeoutSeconds": 120,
+  "maxDecisionsPerTurn": 80,
+  "extraRules": ""
+}

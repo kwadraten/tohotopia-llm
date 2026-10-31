@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Agents.AI" Version="1.24.0" />
+    <PackageReference Include="FSharp.ModelsDev" Version="0.1.1" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
+  </ItemGroup>
+
+<ItemGroup><Compile Include="..\Shared\RoomContracts.cs" Link="RoomContracts.cs" /><Compile Include="..\Shared\AgentEvents.cs" Link="AgentEvents.cs" /><Compile Include="..\Shared\ChatActions.cs" Link="ChatActions.cs" /><Compile Include="..\Shared\GameRules.cs" Link="GameRules.cs" /></ItemGroup></Project>
+
