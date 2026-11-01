@@ -13,6 +13,17 @@ internal static class NativeAiSeats
 
     internal static int Available(IEnumerable<NativeAiSeat> seats) => Eligible(seats).Length;
 
+    internal static Dictionary<int, int> AssignSlots(IEnumerable<NativeAiSeat> seats, int count)
+    {
+        var selected = Eligible(seats);
+        if (count < 1 || count > 4 || selected.Length < count)
+            return new();
+        var result = new Dictionary<int, int>();
+        for (int i = 0; i < count; i++)
+            if (!result.TryAdd(selected[i].Index, i + 1)) return new();
+        return result;
+    }
+
     internal static Dictionary<uint, int> Assign(IEnumerable<NativeAiSeat> seats, int count)
     {
         var selected = Eligible(seats);

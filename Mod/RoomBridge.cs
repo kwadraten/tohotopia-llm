@@ -27,6 +27,8 @@ internal sealed class RoomBridge
     internal ChatParticipant[] ChatParticipants() => native.ChatParticipants();
     internal string DeliverDecision(uint playerId, string payload) => payload;
     public bool ModelsEnabled => native.ModelsEnabled;
+    internal void PollTurnName(ModelTurnFallback fallback) => names.PollTurn(native, fallback);
+    internal string MatchSession => native.MatchSession;
     internal void ExecuteModelAction(Action action) => action();
     public void ModelStopped(string message) => native.ModelStopped(message);
 
@@ -36,12 +38,12 @@ internal sealed class RoomBridge
         var view = N.Get<IntPtr>(controller, "_script");
         battle.SettingsPoll(view != IntPtr.Zero && N.Get<bool>(view, "_show"));
         native.Poll(RoomFiles.Read<RoomConfig>(root, "room.json"));
-        names.Poll(native);
+        names.Poll(native, view);
     }
 
     public void Dispose()
     {
         native.Dispose();
-        names.Poll(native);
+        names.Poll(native, IntPtr.Zero);
     }
 }

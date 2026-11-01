@@ -51,6 +51,10 @@ public partial class Battle : MonoBehaviour
     JsonSerializerOptions json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     readonly SettingsLauncher settingsLauncher = new();
     internal void SettingsPoll(bool lobbyOpen) => settingsLauncher.Poll(lobbyOpen);
+    public void LateUpdate()
+    {
+        if (ready) room?.PollTurnName(turnFallback);
+    }
     public void Update()
     {
         if (Input.GetKeyDown(KeyCode.F8))
@@ -400,10 +404,36 @@ public partial class Battle : MonoBehaviour
     {
         turnFallback.Fail(playerId, turn);
         Cancel();
+        bool resumed = RestartNativeTurn();
         Pause(false);
-        status = $"AI 席位 {room.Seat(playerId)} 本回合已交还原生 AI，其他席位继续模型决策；{reason}";
+        status = resumed
+            ? $"AI 席位 {room.Seat(playerId)} 本回合已交还原生 AI，其他席位继续模型决策；{reason}"
+            : $"AI 席位 {room.Seat(playerId)} 原生 AI 初始化失败，本回合结束；其他席位继续模型决策；{reason}";
         Log.LogWarning(status);
         Event("seat_fallback", status, level: "warning");
+    }
+    bool RestartNativeTurn()
+    {
+        if (currentAI == IntPtr.Zero || currentPlayer == IntPtr.Zero ||
+            N.Get<IntPtr>(currentAI, "_playerData") != currentPlayer)
+            return false;
+        try
+        {
+            var map = N.Get<IntPtr>(currentAI, "_mapData");
+            var kernel = N.Get<IntPtr>(currentAI, "_kernel");
+            int state = N.Get<int>(currentAI, "AILogicState");
+            if (map == IntPtr.Zero || map != previousMap || kernel == IntPtr.Zero || (state != 1 && state != 2))
+                throw new InvalidOperationException("原生 AI 状态不允许中途恢复");
+            N.Call(kernel, "koq");
+            N.Call(kernel, "koo", map, currentPlayer);
+            return true;
+        }
+        catch (Exception e)
+        {
+            Log.LogError("原生 AI 恢复失败，结束当前回合：" + e.Message);
+            N.SetInt(currentAI, "AILogicState", 4);
+            return false;
+        }
     }
     public void OnDestroy()
     {
@@ -483,6 +513,7 @@ public partial class Battle : MonoBehaviour
         var request = new
         {
             requestId,
+            sessionId = room.MatchSession,
             mapId = N.Get<uint>(map, "MapID"),
             playerId = N.Id(player),
             turn = N.Get<uint>(player, "Turn"),

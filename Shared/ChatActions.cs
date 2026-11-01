@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Globalization;
 
 namespace TohotopiaShared;
 
@@ -11,6 +12,24 @@ public static class ChatActions
     public const string TeamId = "chat_team";
     public const int MaxTextBytes = 2048;
     public const int MaxPerTurn = 2;
+    public static string ModelLabel(string model)
+    {
+        string safe = new string((model ?? "").Select(c =>
+            char.IsControl(c) ? ' ' : c == '<' ? '＜' : c == '>' ? '＞' : c).ToArray()).Trim();
+        var text = new StringInfo(safe);
+        return text.LengthInTextElements > 48 ? text.SubstringByTextElements(0, 48) + "…" : safe;
+    }
+    public static string RelayMessage(int seat, string model, string text)
+    {
+        string label = ModelLabel(model);
+        string name = label.Length == 0 ? $"AI 席位 {seat}" : label;
+        string message = $"[代{name} 转发] {text.Trim()}";
+        ValidateMessage(message);
+        return message;
+    }
+    public static bool IsRelayedMessage(string text) =>
+        text.StartsWith("[房主代 AI 席位 ", StringComparison.Ordinal) ||
+        (text.StartsWith("[代", StringComparison.Ordinal) && text.IndexOf(" 转发]", 2, StringComparison.Ordinal) >= 3);
     public static bool CanRelayTeam(int aiTeam, int hostTeam) =>
         aiTeam > 0 && aiTeam == hostTeam;
     public static string Channel(string candidateId) => candidateId switch

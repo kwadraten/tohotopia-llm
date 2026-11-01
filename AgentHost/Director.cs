@@ -24,7 +24,7 @@ public sealed class Director(OAuth oauth, Func<AgentConfig, OAuth, IChatClient>?
     }
     public static void Validate(DecisionRequest r)
     {
-        if (r.RequestId.Length > 100 || r.Candidates.Count > 5000 || r.PlayerId == 0 || r.Feedback.Length > 2000)
+        if (string.IsNullOrWhiteSpace(r.SessionId) || r.SessionId.Length > 100 || r.RequestId.Length is < 1 or > 100 || r.Candidates.Count > 5000 || r.PlayerId == 0 || r.Feedback.Length > 2000)
             throw new ArgumentException("Invalid decision request");
         if (r.Candidates.Select(c => c.Id).Distinct().Count() != r.Candidates.Count)
             throw new ArgumentException("Duplicate candidate IDs");
@@ -34,7 +34,8 @@ public sealed class Director(OAuth oauth, Func<AgentConfig, OAuth, IChatClient>?
     public async Task<Decision> Decide(DecisionRequest r, CancellationToken ct)
     {
         Validate(r);
-        string key = $"{r.MapId}:{r.PlayerId}";
+        string key = $"{r.SessionId}:{r.MapId}:{r.PlayerId}";
+        string cacheKey = $"{r.SessionId}:{r.RequestId}";
         var gate = locks.GetOrAdd(key, _ => new(1, 1));
         await gate.WaitAsync(ct);
         AgentConfig? effective = null;
@@ -42,7 +43,7 @@ public sealed class Director(OAuth oauth, Func<AgentConfig, OAuth, IChatClient>?
         void Event(string stage, string message, string level = "info", string candidate = "") => TohotopiaShared.AgentEvents.Write(Files.Root, new(DateTimeOffset.UtcNow, "host", stage, message, level, r.MapId, r.PlayerId, r.Turn, r.AiSlot, effective?.Provider ?? "", effective?.Model ?? "", r.RequestId, candidate, r.Sequence));
         try
         {
-            if (cache.TryGetValue(r.RequestId, out var previous))
+            if (cache.TryGetValue(cacheKey, out var previous))
                 return previous;
             var config = ConfigFor(r.AiSlot);
             effective = config;
@@ -126,7 +127,7 @@ public sealed class Director(OAuth oauth, Func<AgentConfig, OAuth, IChatClient>?
             string nextMemory = chosen.Memory ?? "";
             memories[key] = nextMemory.Length <= 1500 ? nextMemory : nextMemory[..1500];
             Event("model_decision", $"模型已返回 {validated.Count} 步动作序列，耗时={elapsed.ElapsedMilliseconds}ms；{chosen.Reason}", candidate: validated[0].CandidateId);
-            cache[r.RequestId] = chosen;
+            cache[cacheKey] = chosen;
             if (cache.Count > 2000)
                 cache.Clear();
             return chosen;
@@ -140,7 +141,7 @@ public sealed class Director(OAuth oauth, Func<AgentConfig, OAuth, IChatClient>?
             || r.SessionId.Length is < 1 or > 100 || r.Observation.ValueKind != JsonValueKind.Object
             || r.AvailableChannels.Any(c => c is not ("team" or "public")))
             throw new ArgumentException("Invalid communication request");
-        string key = $"{r.MapId}:{r.PlayerId}";
+        string key = $"{r.SessionId}:{r.MapId}:{r.PlayerId}";
         var gate = locks.GetOrAdd(key, _ => new(1, 1));
         await gate.WaitAsync(ct);
         try

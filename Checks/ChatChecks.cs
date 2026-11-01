@@ -14,7 +14,7 @@ internal static class ChatChecks
         }
         var observation = JsonSerializer.Deserialize<JsonElement>("""{"grids":[],"chat":{"recentMessages":[]}}""");
         var request = new DecisionRequest("chat-public", 55, 330, 1, 0, observation,
-            new() { new("a0", "UnitMove", 0, 0, 0, 0, 0, 0, "move"), new(ChatActions.PublicId, ChatActions.Kind(ChatActions.PublicId), 0, 0, 0, 0, 0, 0, "public"), new("end_turn", "EndTurn", 0, 0, 0, 0, 0, 0, "end") }, "chat rules");
+            new() { new("a0", "UnitMove", 0, 0, 0, 0, 0, 0, "move"), new(ChatActions.PublicId, ChatActions.Kind(ChatActions.PublicId), 0, 0, 0, 0, 0, 0, "public"), new("end_turn", "EndTurn", 0, 0, 0, 0, 0, 0, "end") }, "chat rules", SessionId: "chat-match");
         var client = new ChatFixture();
         var director = new Director(new OAuth(), (_, _) => client);
         client.Reply = new("chat-public", ChatActions.PublicId, "communicate", Message: "  一起防守北方。  ");
@@ -40,6 +40,18 @@ internal static class ChatChecks
         Check((await director.Decide(onlyChat, CancellationToken.None)).CandidateId == "end_turn", "only chat candidates cause end turn");
         ChatActions.ValidateMessage(new string('a', 2048));
         Check(true, "message limit accepts exactly 2048 UTF-8 bytes");
+        string forwarded = ChatActions.RelayMessage(2, "provider/model", "  hello  ");
+        Check(forwarded == "[代provider/model 转发] hello" &&
+            ChatActions.IsRelayedMessage(forwarded) &&
+            ChatActions.IsRelayedMessage("[房主代 AI 席位 2 转发] hello") &&
+            !ChatActions.IsRelayedMessage("[代我问候] hello"),
+            "forwarded chat identifies the model and remains recognizable as a host relay");
+        Check(ChatActions.RelayMessage(1, "", "hello") == "[代AI 席位 1 转发] hello" &&
+            !ChatActions.ModelLabel("<b>\nname</b>").Contains('<') &&
+            ChatActions.ModelLabel(new string('x', 100)).Length == 49,
+            "model labels are bounded, sanitized and support missing names");
+        try { ChatActions.RelayMessage(1, "model", new string('a', 2048)); throw new Exception("Oversized relay accepted"); }
+        catch (ArgumentException) { Console.WriteLine("PASS complete forwarded message obeys the native byte limit"); }
         var inbox = new ChatInbox();
         inbox.Add(new("1", 2, "ally", "public", 0, "public"));
         inbox.Add(new("2", 3, "ally", "team", 1, "team one"));

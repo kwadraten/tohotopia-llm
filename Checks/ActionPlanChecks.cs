@@ -17,7 +17,7 @@ static class ActionPlanChecks
         var request = new DecisionRequest("plan", 1, 330, 2, 0, observation,
             [new("a0", "UnitMove", 1, 0, 2, 0, 0, 0, "move"),
              new("a1", "Build", 1, 0, 2, 0, 0, 0, "build"),
-             new("end_turn", "EndTurn", 0, 0, 0, 0, 0, 0, "end")], "rules", Feedback: "a0 因金币不足失败；剩余步骤 a1");
+             new("end_turn", "EndTurn", 0, 0, 0, 0, 0, 0, "end")], "rules", Feedback: "a0 因金币不足失败；剩余步骤 a1", SessionId: "plan-match");
         var client = new FakeClient
         {
             Response = """{"requestId":"plan","actions":[{"candidateId":"a0"},{"candidateId":"a1"},{"candidateId":"end_turn"}],"reason":"batch"}"""

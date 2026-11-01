@@ -75,7 +75,7 @@ internal sealed unsafe class NativeAiBridge
         if (team <= 0 || !slots.Any(s => s.MemberId == sender && s.TeamId == team)
             || !slots.Any(s => s.MemberId == recipient && s.TeamId == team)) return;
         string content = N.TextField(data, "Text");
-        if (sender == hostMemberId && content.StartsWith("[房主代 AI 席位 ", StringComparison.Ordinal)) return;
+        if (sender == hostMemberId && ChatActions.IsRelayedMessage(content)) return;
         if (!teamInboxes.TryGetValue(team, out var inbox)) teamInboxes[team] = inbox = new();
         string id = N.Get<Guid>(data, "MessageId").ToString("N");
         if (!teamMessageTimes.ContainsKey(id)) teamMessageTimes[id] = Time.realtimeSinceStartupAsDouble;
@@ -84,10 +84,13 @@ internal sealed unsafe class NativeAiBridge
     }
 
     readonly Dictionary<uint, int> seats = new();
+    readonly HashSet<Guid> previousChatIds = new();
+    bool chatBaselineCaptured;
     RoomConfig config;
     IntPtr map;
     ulong lobbyId, hostMemberId;
     string commandId = "", modelError = "";
+    string matchSession = "";
     float lastStatus;
     bool active, joined, started, models, desiredModels;
 
@@ -98,12 +101,23 @@ internal sealed unsafe class NativeAiBridge
     }
 
     internal bool Active => active;
+    internal string MatchSession => matchSession;
     internal bool ModelsEnabled => active && started && models;
     internal int Seat(uint playerId) => active && seats.TryGetValue(playerId, out int seat) ? seat : 0;
     internal string ModelName(uint playerId)
     {
         int seat = ModelsEnabled ? Seat(playerId) : 0;
         return seat > 0 && seat <= config.AIs.Count ? config.AIs[seat - 1].Model : "";
+    }
+    internal Dictionary<int, string> LobbyModelNames()
+    {
+        var result = new Dictionary<int, string>();
+        if (!active || !joined || started || !desiredModels || config == null) return result;
+        var main = N.Static("TH1_Logic.Core.Main", "<Instance>k__BackingField");
+        var slots = Slots(N.Get<IntPtr>(main, "MapConfig"));
+        foreach (var pair in NativeAiSeats.AssignSlots(slots, config.AIs.Count))
+            result[pair.Key] = config.AIs[pair.Value - 1].Model;
+        return result;
     }
     internal uint[] ControlledPlayers() => ModelsEnabled ? seats.Keys.ToArray() : Array.Empty<uint>();
     IntPtr ChatSession()
@@ -133,12 +147,14 @@ internal sealed unsafe class NativeAiBridge
     {
         if (Seat(playerId) == 0) return Array.Empty<ChatObservation>();
         var session = ChatSession();
+        CaptureChatBaseline(session);
         var history = N.Get<IntPtr>(session, "History");
         int team = Team(playerId);
         bool sameTeam = ChatActions.CanRelayTeam(team, N.Get<int>(N.Get<IntPtr>(session, "<Context>k__BackingField"), "Team"));
         var local = N.Items(N.Get<IntPtr>(history, "_entries"))
-            .Where(entry => entry != IntPtr.Zero && (N.Get<ulong>(entry, "Sender") != hostMemberId
-                || !N.TextField(entry, "Text").StartsWith("[房主代 AI 席位 ", StringComparison.Ordinal)))
+            .Where(entry => entry != IntPtr.Zero && !previousChatIds.Contains(N.Get<Guid>(entry, "MessageId"))
+                && (N.Get<ulong>(entry, "Sender") != hostMemberId
+                || !ChatActions.IsRelayedMessage(N.TextField(entry, "Text"))))
             .Where(entry => N.Get<byte>(entry, "Channel") == 0
                 || sameTeam && N.Get<byte>(entry, "Channel") == 1 && N.Get<int>(entry, "Team") == team)
             .TakeLast(20)
@@ -151,6 +167,16 @@ internal sealed unsafe class NativeAiBridge
             .GroupBy(x => (x.Message.SenderMemberId, x.Message.MessageId)).Select(g => g.First())
             .OrderBy(x => x.At).TakeLast(20).Select(x => x.Message).ToArray();
     }
+
+    void CaptureChatBaseline(IntPtr session)
+    {
+        if (chatBaselineCaptured || session == IntPtr.Zero) return;
+        var history = N.Get<IntPtr>(session, "History");
+        if (history == IntPtr.Zero) return;
+        foreach (var entry in N.Items(N.Get<IntPtr>(history, "_entries")))
+            if (entry != IntPtr.Zero) previousChatIds.Add(N.Get<Guid>(entry, "MessageId"));
+        chatBaselineCaptured = true;
+    }
     internal bool SendChat(uint playerId, string channel, string text, out string result)
     {
         if (!ChatChannels(playerId).Contains(channel))
@@ -158,8 +184,7 @@ internal sealed unsafe class NativeAiBridge
             result = "该频道不可用，聊天尚未就绪或房主与 AI 不满足同盟转发条件";
             return false;
         }
-        string message = $"[房主代 AI 席位 {Seat(playerId)} 转发] {text.Trim()}";
-        ChatActions.ValidateMessage(message);
+        string message = ChatActions.RelayMessage(Seat(playerId), ModelName(playerId), text);
         var session = ChatSession();
         var context = N.Get<IntPtr>(session, "<Context>k__BackingField");
         if (channel == "team" && Team(playerId) != N.Get<int>(context, "Team"))
@@ -295,7 +320,9 @@ internal sealed unsafe class NativeAiBridge
                     return;
                 }
                 map = gameMap;
+                matchSession = Guid.NewGuid().ToString("N");
                 started = true;
+                CaptureChatBaseline(N.Get<IntPtr>(N.Static("TH1_Logic.Chat.ChatManager", "Instance"), "<Session>k__BackingField"));
                 modelError = "";
                 if (desiredModels) StartModels();
             }
@@ -374,6 +401,9 @@ internal sealed unsafe class NativeAiBridge
         }
         started = false;
         map = IntPtr.Zero;
+        matchSession = "";
+        previousChatIds.Clear();
+        chatBaselineCaptured = false;
         seats.Clear();
         teamInboxes.Clear();
         teamMessageTimes.Clear();

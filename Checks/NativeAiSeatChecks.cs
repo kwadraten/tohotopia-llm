@@ -23,6 +23,10 @@ static class NativeAiSeatChecks
         Check(mapped.Count == 2 && mapped[101] == 1 && mapped[303] == 2
             && !mapped.ContainsKey(100) && !mapped.ContainsKey(202), "only native AI seats map to model order");
         Check(NativeAiSeats.Available(slots) == 2, "open and human-controlled seats are excluded");
+        var lobby = NativeAiSeats.AssignSlots(slots, 2);
+        Check(lobby.Count == 2 && lobby[1] == 1 && lobby[3] == 2 &&
+            NativeAiSeats.AssignSlots(slots, 3).Count == 0,
+            "lobby labels use the same ordered AI seats and require enough seats");
         bool missing = false, unmapped = false, duplicate = false;
         try { NativeAiSeats.Assign(slots, 3); } catch (InvalidOperationException) { missing = true; }
         try { NativeAiSeats.Assign(slots.WithPlayerId(1, 0), 2); } catch (InvalidOperationException) { unmapped = true; }

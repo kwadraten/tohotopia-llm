@@ -18,11 +18,11 @@ SpatialTableChecks.Run();
 RulePromptChecks.Run();
 SubscriptionReplayChecks.Run();
 var observation = JsonSerializer.Deserialize<JsonElement>("""{"selfId":330,"grids":[{"id":245,"x":2,"y":3,"terrain":"Land","resource":"Fruit","building":"None"}]}""");
-var r = new DecisionRequest("test-1", 1, 330, 2, 0, observation, new() { new("a0", "UnitMove", 355, 0, 245, 0, 0, 0, "move"), new("end_turn", "EndTurn", 0, 0, 0, 0, 0, 0, "end") }, "帝国文明测试规则");
+var r = new DecisionRequest("test-1", 1, 330, 2, 0, observation, new() { new("a0", "UnitMove", 355, 0, 245, 0, 0, 0, "move"), new("end_turn", "EndTurn", 0, 0, 0, 0, 0, 0, "end") }, "帝国文明测试规则", SessionId: "test-match");
 void Check(bool ok, string message) { if (!ok) throw new Exception(message); Console.WriteLine("PASS " + message); }
 var fallback = new TohotopiaMod.ModelTurnFallback();
 fallback.Fail(330, 2);
-Check(fallback.IsNative(330, 2) && !fallback.IsNative(331, 2), "failed AI turn falls back without disabling another seat");
+Check(fallback.IsNative(330, 2) && !fallback.IsNative(330, 3) && !fallback.IsNative(331, 2), "failed AI turn falls back without disabling another seat");
 fallback.Fail(331, 2);
 Check(fallback.IsNative(330, 2) && fallback.IsNative(331, 2) && !fallback.IsNative(330, 3), "multiple failures remain isolated and next turn retries models");
 fallback.Clear();

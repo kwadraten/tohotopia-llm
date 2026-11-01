@@ -15,7 +15,7 @@ public record AgentConfig
     public string ExtraRules { get; init; } = "";
 }
 public record Candidate(string Id, string Kind, uint UnitId, uint CityId, uint GridId, uint TargetUnitId, uint TargetGridId, uint TargetPlayerId, string Description);
-public record DecisionRequest(string RequestId, uint MapId, uint PlayerId, uint Turn, int Sequence, JsonElement Observation, List<Candidate> Candidates, string CivilizationRules, int AiSlot = 0, string Feedback = "");
+public record DecisionRequest(string RequestId, uint MapId, uint PlayerId, uint Turn, int Sequence, JsonElement Observation, List<Candidate> Candidates, string CivilizationRules, int AiSlot = 0, string Feedback = "", string SessionId = "");
 public record Decision(string RequestId, string CandidateId = "", string Reason = "", string Memory = "", string Message = "", List<PlannedStep>? Actions = null)
 {
     [JsonIgnore] public IReadOnlyList<PlannedStep> Steps => Actions ?? [new(CandidateId, Message)];

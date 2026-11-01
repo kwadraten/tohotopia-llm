@@ -30,7 +30,7 @@ public partial class Battle
         ambientSchedule.Clear();
         visibleSnapshots.Clear();
         recentAmbient.Clear();
-        ambientSession = Guid.NewGuid().ToString("N");
+        ambientSession = room?.MatchSession ?? "";
         ambientErrorUntil = 0;
     }
 

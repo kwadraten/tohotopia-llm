@@ -30,7 +30,7 @@ The BepInEx plugin takes over actions for the host-controlled native AI seats in
 
 The agent uses Microsoft Agent Framework. For each decision, it combines visible state, relevant rules, a short strategic memory, and feedback from the previous plan. It asks the model for a plan of up to 12 actions; the model can also query locally exported game rules. The host validates the returned candidate IDs, and the game revalidates each action before execution. After actions are executed, the plugin collects fresh state and candidates. If a later action is no longer valid, it stops the plan and sends the reason and updated state back for replanning. The turn ends when no action is appropriate or the per-turn limit is reached. Models can also communicate through in-game chat and process visible messages outside their own turn.
 
-If a model request or decision fails, the affected seat returns to the built-in AI for that turn; other seats continue, and the failed seat retries on its next turn. The WinForms window manages accounts, seats, global rules, and logs, and starts the local AgentHost.
+If a model request or decision fails, the built-in AI is reinitialized and takes over the affected seat's current turn. Other seats continue, and the failed seat retries the model on its next turn. If native AI initialization fails, the affected turn ends. The WinForms window manages accounts, seats, global rules, and logs, and starts the local AgentHost.
 
 ## Development and packaging
 

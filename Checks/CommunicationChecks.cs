@@ -42,6 +42,20 @@ static class CommunicationChecks
             && client.LastPrompt.Contains("文明") && client.LastPrompt.Contains("行动回合")
             && client.LastPrompt.Contains("不受本回合剩余行动额度限制"),
             "communication prompt includes ally message, visibility tool and no-turn restrictions");
+        var decision = new DecisionRequest("session-decision", 42, 7, 2, 0, observation,
+            [new("a0", "UnitMove", 1, 0, 3, 0, 0, 0, "move"), new("end_turn", "EndTurn", 0, 0, 0, 0, 0, 0, "end")],
+            "rules", AiSlot: 1, SessionId: "session");
+        client.Response = """{"requestId":"session-decision","candidateId":"a0","reason":"move","memory":"本局专属记忆"}""";
+        await director.Decide(decision, CancellationToken.None);
+        Check(client.LastPrompt.Contains("与盟友协防"), "communication and decisions share memory within a match");
+        int callsBeforeNewMatch = client.Calls;
+        await director.Decide(decision with { SessionId = "new-session" }, CancellationToken.None);
+        Check(client.Calls == callsBeforeNewMatch + 1 && !client.LastPrompt.Contains("本局专属记忆")
+            && !client.LastPrompt.Contains("与盟友协防"), "reused map, player and request IDs cannot leak memory or cached decisions into a new match");
+        client.Response = """{"requestId":"new-comm","channel":"","message":""}""";
+        await director.Communicate(request with { RequestId = "new-comm", SessionId = "third-session" }, CancellationToken.None);
+        Check(!client.LastPrompt.Contains("本局专属记忆") && !client.LastPrompt.Contains("与盟友协防"),
+            "new-match communication cannot read previous match memory");
         client.Response = """{"requestId":"public-ok","channel":"public","message":"愿意谈判吗？"}""";
         var publicReply = await director.Communicate(request with { RequestId = "public-ok", AvailableChannels = ["public"] }, CancellationToken.None);
         Check(publicReply.Channel == "public" && publicReply.Message == "愿意谈判吗？", "public diplomacy is accepted only when offered");
