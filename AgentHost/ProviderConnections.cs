@@ -49,15 +49,19 @@ public sealed class ProviderConnections : IModelCatalog
                 if (snapshot.TryGetProvider(id, out var definition)) next[id] = definition;
             if (File.Exists(path))
             {
-                using var doc = JsonDocument.Parse(File.ReadAllText(path));
-                foreach (var item in doc.RootElement.EnumerateObject())
+                try
                 {
-                    var value = item.Value;
-                    string Read(string key) => value.TryGetProperty(key, out var field) && field.ValueKind == JsonValueKind.String ? field.GetString() ?? "" : "";
-                    string[] env = value.TryGetProperty("env", out var variables) && variables.ValueKind == JsonValueKind.Array
-                        ? variables.EnumerateArray().Select(e => e.GetString() ?? "").ToArray() : [];
-                    next[item.Name] = new(item.Name, Read("name"), Read("api"), Protocol(Read("npm")), env, Read("doc"));
+                    var catalog = ModelCatalog.ReadCatalog(File.ReadAllText(path));
+                    foreach (var item in catalog.EnumerateObject())
+                    {
+                        var value = item.Value;
+                        string Read(string key) => value.TryGetProperty(key, out var field) && field.ValueKind == JsonValueKind.String ? field.GetString() ?? "" : "";
+                        string[] env = value.TryGetProperty("env", out var variables) && variables.ValueKind == JsonValueKind.Array
+                            ? variables.EnumerateArray().Select(e => e.GetString() ?? "").ToArray() : [];
+                        next[item.Name] = new(item.Name, Read("name"), Read("api"), Protocol(Read("npm")), env, Read("doc"));
+                    }
                 }
+                catch (Exception e) when (e is IOException or JsonException or InvalidDataException) { }
             }
             definitions = next;
             loadedPath = path;

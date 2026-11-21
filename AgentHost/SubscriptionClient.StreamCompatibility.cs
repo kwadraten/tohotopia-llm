@@ -21,7 +21,7 @@ public sealed partial class SubscriptionClient
             foreach (var call in message.Contents.OfType<FunctionCallContent>())
             {
                 if (items.OfType<JsonObject>().Any(i => i["type"]?.GetValue<string>() == "function_call" && i["call_id"]?.GetValue<string>() == call.CallId)) continue;
-                items.Add(new JsonObject { ["type"] = "function_call", ["call_id"] = call.CallId, ["name"] = call.Name, ["arguments"] = JsonSerializer.Serialize(call.Arguments) });
+                items.Add((JsonNode)new JsonObject { ["type"] = "function_call", ["call_id"] = call.CallId, ["name"] = call.Name, ["arguments"] = HostJson.SerializeValue(call.Arguments) });
             }
             message.AdditionalProperties![key] = state.ToJsonString();
         }

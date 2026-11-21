@@ -1,47 +1,88 @@
 using System.Text.Json;
+using FSharp.ModelsDev.Catalog;
 namespace Tohotopia;
 
 public sealed class ModelCatalog(OAuth oauth, HttpClient? client = null)
 {
     readonly HttpClient http = client ?? new() { Timeout = TimeSpan.FromSeconds(30) };
-    JsonElement data; DateTime loadedAt; readonly SemaphoreSlim gate = new(1, 1);
+    JsonElement data; bool initialized; DateTime nextRefresh;
+    Task? refresh;
+    readonly SemaphoreSlim gate = new(1, 1);
     static string Source(string p) => p switch { "grok" => "xai", "kimi" => "kimi-code-plan-global", _ => p };
     public static string Driver(string p) => p switch { "xai" => "grok", "kimi-code-plan-global" => "kimi", _ => p };
     public async Task<List<CatalogProvider>> Providers(CancellationToken ct)
     {
-        await Load(ct);
-        return data.EnumerateObject().Select(p =>
+        var current = await Load(ct);
+        var providers = current.ValueKind == JsonValueKind.Object
+            ? current.EnumerateObject().Select(p => (Id: p.Name, Name: p.Value.TryGetProperty("name", out var n) ? n.GetString() ?? p.Name : p.Name))
+            : SnapshotCatalog.Default.ProviderIds.Select(id => (Id: id, Name: SnapshotCatalog.Default.TryGetProvider(id, out var p) ? p.Name : id));
+        return providers.Select(p =>
         {
-            var methods = OAuth.AuthMethods(p.Name);
-            return new CatalogProvider(p.Name, p.Value.TryGetProperty("name", out var n) ? n.GetString() ?? p.Name : p.Name, OAuth.SupportsInference(p.Name), methods);
+            var methods = OAuth.AuthMethods(p.Id);
+            return new CatalogProvider(p.Id, p.Name, OAuth.SupportsInference(p.Id), methods);
         }).OrderByDescending(p => p.ConnectionSupported).ThenBy(p => p.Name).ToList();
     }
-    async Task Load(CancellationToken ct)
+    async Task<JsonElement> Load(CancellationToken ct)
     {
         await gate.WaitAsync(ct);
         try
         {
-            if (data.ValueKind == JsonValueKind.Object && loadedAt > DateTime.UtcNow.AddDays(-1))
-                return;
             string path = Path.Combine(Files.Root, "models-dev.json");
-            if (!File.Exists(path) || File.GetLastWriteTimeUtc(path) < DateTime.UtcNow.AddDays(-1))
+            if (!initialized)
             {
                 try
                 {
-                    string raw = await http.GetStringAsync("https://models.dev/api.json", ct);
-                    using var check = JsonDocument.Parse(raw);
-                    if (check.RootElement.ValueKind != JsonValueKind.Object)
-                        throw new InvalidDataException("模型目录格式错误");
-                    File.WriteAllText(path + ".tmp", raw);
-                    File.Move(path + ".tmp", path, true);
+                    data = ReadCatalog(await File.ReadAllTextAsync(path, ct));
+                    nextRefresh = File.GetLastWriteTimeUtc(path).AddDays(1);
                 }
-                catch when (File.Exists(path) && !ct.IsCancellationRequested) { }
+                catch (Exception e) when (e is IOException or JsonException or InvalidDataException) { }
+                initialized = true;
             }
-            using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(path, ct));
-            data = doc.RootElement.Clone();
-            loadedAt = DateTime.UtcNow;
+            if (DateTime.UtcNow >= nextRefresh && (refresh == null || refresh.IsCompleted))
+            {
+                // A slow or unreachable models.dev must never delay local catalog reads.
+                // Back off after failure and share one refresh across concurrent requests.
+                nextRefresh = DateTime.UtcNow.AddMinutes(5);
+                refresh = Task.Run(() => Refresh(path));
+            }
+            return data;
         }
         finally { gate.Release(); }
+    }
+    internal static JsonElement ReadCatalog(string raw)
+    {
+        using var doc = JsonDocument.Parse(raw);
+        if (doc.RootElement.ValueKind != JsonValueKind.Object || doc.RootElement.EnumerateObject().Any(p => p.Value.ValueKind != JsonValueKind.Object))
+            throw new InvalidDataException("模型目录格式错误");
+        return doc.RootElement.Clone();
+    }
+    async Task Refresh(string path)
+    {
+        string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            string raw = await http.GetStringAsync("https://models.dev/api.json", timeout.Token);
+            var updated = ReadCatalog(raw);
+            await File.WriteAllTextAsync(temporary, raw, timeout.Token);
+            await gate.WaitAsync(timeout.Token);
+            try
+            {
+                File.Move(temporary, path, true);
+                data = updated;
+                nextRefresh = DateTime.UtcNow.AddDays(1);
+            }
+            finally { gate.Release(); }
+        }
+        catch (Exception e) when (e is HttpRequestException or IOException or JsonException or InvalidDataException or OperationCanceledException)
+        {
+            Console.Error.WriteLine("模型目录后台更新失败，继续使用本地目录：" + e.Message);
+        }
+        finally
+        {
+            try { File.Delete(temporary); }
+            catch (IOException) { }
+        }
     }
     public static List<CatalogModel> ParseModels(JsonElement info)
     {
@@ -69,9 +110,15 @@ public sealed class ModelCatalog(OAuth oauth, HttpClient? client = null)
     }
     public async Task<List<CatalogModel>> Models(string provider, CancellationToken ct)
     {
-        await Load(ct);
+        var current = await Load(ct);
         string p = Source(provider);
-        var result = data.TryGetProperty(p, out var info) ? ParseModels(info) : new List<CatalogModel>();
+        var result = current.ValueKind == JsonValueKind.Object
+            ? (current.TryGetProperty(p, out var info) ? ParseModels(info) : new List<CatalogModel>())
+            : SnapshotCatalog.Default.GetModels(p)
+                .Where(m => !(m.Family ?? "").Contains("embedding", StringComparison.OrdinalIgnoreCase)
+                    && (m.OutputModalities.Count == 0 || m.OutputModalities.All(output => output == "text")))
+                .Select(m => new CatalogModel(m.ModelId, m.DisplayName, m.SupportsReasoning, m.ReasoningEfforts.ToArray()))
+                .OrderBy(m => m.Id).ToList();
         if (Driver(provider) == "openai" && oauth.CanInfer("openai"))
         {
             using var response = await OpenAIModels(ct);

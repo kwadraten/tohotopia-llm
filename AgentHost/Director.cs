@@ -22,6 +22,69 @@ public sealed class Director(OAuth oauth, Func<AgentConfig, OAuth, IChatClient>?
         var seat = room.AIs[aiSlot - 1];
         return config with { Provider = seat.Provider, Model = seat.Model, Reasoning = seat.Reasoning };
     }
+    public async Task<PingResult> Ping(string provider, ModelCatalog catalog, CancellationToken ct)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        string driver = ModelCatalog.Driver(provider);
+        var config = Files.Config;
+        string model = "", reasoning = "default";
+        var room = RoomFiles.Read<RoomConfig>(Files.Root, "room.json");
+        var seat = room?.AIs.FirstOrDefault(s => ModelCatalog.Driver(s.Provider) == driver && !string.IsNullOrWhiteSpace(s.Model));
+        if (seat is not null)
+        {
+            model = seat.Model;
+            reasoning = seat.Reasoning;
+        }
+        else if (ModelCatalog.Driver(config.Provider) == driver && !string.IsNullOrWhiteSpace(config.Model))
+        {
+            model = config.Model;
+            reasoning = config.Reasoning;
+        }
+        if (model.Length == 0)
+        {
+            try
+            {
+                var models = await catalog.Models(provider, ct);
+                if (models.Count > 0)
+                    model = models.OrderBy(m => m.Id).First().Id;
+            }
+            catch (Exception e) when (e is HttpRequestException or IOException or InvalidOperationException or OperationCanceledException) { }
+        }
+        if (model.Length == 0)
+        {
+            var info = ProviderConnections.Catalog.GetModels(driver)
+                .FirstOrDefault(m => !(m.Family ?? "").Contains("embedding", StringComparison.OrdinalIgnoreCase)
+                    && (m.OutputModalities.Count == 0 || m.OutputModalities.All(output => output == "text")));
+            if (info is not null)
+                model = info.ModelId;
+        }
+        void Event(string stage, string message, string level = "info") => TohotopiaShared.AgentEvents.Write(Files.Root,
+            new(DateTimeOffset.UtcNow, "host", stage, message, level, Provider: driver, Model: model));
+        if (model.Length == 0)
+        {
+            const string missing = "没有可用的模型：请先在“AI 接管”页为该提供商配置席位模型，或在全局设置中指定模型。";
+            Event("ping", missing, "error");
+            return new(false, driver, "", clock.ElapsedMilliseconds, "", missing);
+        }
+        var ping = config with { Provider = driver, Model = model, Reasoning = reasoning };
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(config.TimeoutSeconds, 10, 120)));
+            using var client = clientFactory?.Invoke(ping, oauth) ?? new SubscriptionClient(ping, oauth);
+            var response = await client.GetResponseAsync(new[] { new ChatMessage(ChatRole.User, "Ping! Just answer me ‘Pong!’") }, null, timeout.Token);
+            string reply = response.Text ?? "";
+            Event("ping", $"连通性测试成功：模型在 {clock.ElapsedMilliseconds}ms 内回复 {reply.Trim()}");
+            return new(true, driver, model, clock.ElapsedMilliseconds, reply.Trim(), "");
+        }
+        catch (Exception e)
+        {
+            string error = e is OperationCanceledException && !ct.IsCancellationRequested
+                ? $"连通性测试超时（{Math.Clamp(config.TimeoutSeconds, 10, 120)} 秒内未收到模型回复）" : e.Message;
+            Event("ping", "连通性测试失败：" + error, "error");
+            return new(false, driver, model, clock.ElapsedMilliseconds, "", error);
+        }
+    }
     public static void Validate(DecisionRequest r)
     {
         if (string.IsNullOrWhiteSpace(r.SessionId) || r.SessionId.Length > 100 || r.RequestId.Length is < 1 or > 100 || r.Candidates.Count > 5000 || r.PlayerId == 0 || r.Feedback.Length > 2000)

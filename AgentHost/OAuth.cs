@@ -8,13 +8,13 @@ using Microsoft.AspNetCore.WebUtilities;
 namespace Tohotopia;
 
 public record Token(string Access, string Refresh, DateTimeOffset Expires, string AccountId = "", string ClientId = "", string Scope = "", string IdToken = "", string AuthType = "subscription", string BaseUrl = "", string WorkspaceId = "");
-public sealed class OAuth
+public sealed partial class OAuth
 {
     readonly HttpClient http;
     readonly ConcurrentDictionary<string, LoginState> logins = new();
     readonly ConcurrentDictionary<string, Pending> pending = new();
     readonly SemaphoreSlim refreshLock = new(1, 1);
-    record Pending(string Provider, string State, string Verifier, string Redirect, DateTimeOffset Deadline, string Nonce = "");
+    record Pending(string Provider, string State, string Verifier, string Redirect, DateTimeOffset Deadline, Lease Owner, CancellationTokenSource Cancellation, string Nonce = "");
     record Spec(string Client, string Device, string Token, string Scope);
     static ProviderAuthMethod ApiKeyMethod(params ProviderAuthPrompt[] prompts) => new("api", "填写 API Key", prompts);
     static ProviderAuthMethod SubscriptionMethod(string label) => new("oauth", label);
@@ -46,6 +46,8 @@ public sealed class OAuth
     };
     public LoginState State(string id)
     {
+        lock (credentialGate)
+        {
         if (!logins.TryGetValue(id, out var s))
             throw new KeyNotFoundException();
         if (s.Status == "pending" && pending.TryGetValue(id, out var p) && p.Deadline < DateTimeOffset.UtcNow)
@@ -58,16 +60,21 @@ public sealed class OAuth
             };
         }
         return s;
+        }
     }
     public bool CanInfer(string p) => Status(p).Connected;
     public static bool SupportsInference(string provider) => ModelCatalog.Driver(provider) is "openai" or "anthropic" or "grok" or "kimi" or "moonshotai"
         || ProviderConnections.TryApiDefinition(provider, out _);
     public AccountStatus Status(string p)
     {
-        p = ModelCatalog.Driver(p);
+        p = Provider(p);
+        lock (credentialGate) return ReadStatus(p);
+    }
+    AccountStatus ReadStatus(string p)
+    {
         if (AuthMethods(p).Length == 0)
             throw new ArgumentException("该提供商没有可用的认证方式");
-        if (!File.Exists(Path.Combine(Files.Root, p + ".token")))
+        if (!File.Exists(CredentialPath(p, ".token")))
             return new(p, false, "not_configured", "尚未配置", Configured: false);
         try
         {
@@ -77,9 +84,11 @@ public sealed class OAuth
                 return new(p, false, "reauthorize", "已保存凭据缺少访问令牌", t.Expires, refresh, true, t.AuthType);
             if (t.AuthType == "api_key")
                 return new(p, SupportsInference(p), "configured", SupportsInference(p) ? "API Key 已加密保存" : "API Key 已加密保存；该提供商的专用模型请求协议尚未接入，暂不可用于 AI 席位。", null, false, true, "api_key");
+            if (t.AuthType != "subscription" || !AuthMethods(p).Any(method => method.Type == "oauth"))
+                return new(p, false, "reauthorize", "已保存的凭据方式不受支持，请重新配置 API Key 或使用受支持的订阅授权", t.Expires, refresh, true, t.AuthType);
             if (p == "openai" && !t.Scope.Split(' ').Contains("chatgpt.tokens.use.direct"))
                 return new(p, false, "reauthorize", "已保存旧授权；需要一次新的 ChatGPT 套餐授权", t.Expires, refresh, true, t.AuthType);
-            var notice = TohotopiaShared.RoomFiles.Read<AccountStatus>(Files.Root, p + "-auth-status.json");
+            var notice = TohotopiaShared.RoomFiles.Read<AccountStatus>(CredentialRoot(Files.Root), p + "-auth-status.json");
             if (notice?.Status == "refresh_failed")
                 return notice with
                 {
@@ -98,18 +107,34 @@ public sealed class OAuth
         .Concat(ProviderConnections.ApiKeyProviderIds).Select(ModelCatalog.Driver).Distinct().Select(Status).ToArray();
     public string ApiBaseUrl(string provider)
     {
-        string p = ModelCatalog.Driver(provider);
+        string p = Provider(provider);
+        lock (credentialGate)
+        {
         if (!ProviderConnections.TryApiDefinition(p, out _)) throw new ArgumentException("该提供商不支持 API Key 请求");
-        string path = Path.Combine(Files.Root, p + ".token");
+        string path = CredentialPath(p, ".token");
         string savedUrl = File.Exists(path) ? Load(p).BaseUrl : "";
         return string.IsNullOrWhiteSpace(savedUrl) ? ProviderConnections.ApiUrl(p) : savedUrl;
+        }
     }
-    public AccountStatus ConfigureApiKey(string provider, ApiKeyRequest input)
+    public AccountStatus ConfigureApiKey(string provider, ApiKeyRequest input) => ConfigureApiKey(provider, input, false);
+    public AccountStatus UpdateApiKey(string provider, ApiKeyRequest input) => ConfigureApiKey(provider, input, true);
+    AccountStatus ConfigureApiKey(string provider, ApiKeyRequest input, bool editing)
     {
-        string p = ModelCatalog.Driver(provider);
+        ArgumentNullException.ThrowIfNull(input);
+        string p = Provider(provider);
+        lock (credentialGate)
+        {
         if (!AuthMethods(p).Any(method => method.Type == "api"))
             throw new ArgumentException("该提供商不支持 API Key 连接");
         string apiKey = input.ApiKey?.Trim() ?? "";
+        if (editing && apiKey.Length == 0)
+        {
+            string path = CredentialPath(p, ".token");
+            var saved = File.Exists(path) ? Load(p) : null;
+            if (saved?.AuthType != "api_key" || string.IsNullOrWhiteSpace(saved.Access))
+                throw new ArgumentException("没有可保留的 API Key；订阅账号请重新授权，或填写新的 API Key");
+            apiKey = saved.Access;
+        }
         if (apiKey.Length is < 1 or > 4096 || apiKey.Any(char.IsControl))
             throw new ArgumentException("API Key 不能为空，且长度不能超过 4096 个字符");
         string workspaceId = input.WorkspaceId?.Trim() ?? "";
@@ -119,7 +144,7 @@ public sealed class OAuth
         if (p == "moonshotai")
         {
             string requested = string.IsNullOrWhiteSpace(input.BaseUrl) ? "https://api.moonshot.ai/v1" : input.BaseUrl.Trim().TrimEnd('/');
-            if (!Uri.TryCreate(requested, UriKind.Absolute, out var uri) || uri.Scheme != "https" || uri.AbsolutePath != "/v1" || uri.Query.Length > 0 || uri.Fragment.Length > 0 || uri.Host is not ("api.moonshot.ai" or "api.moonshot.cn"))
+            if (!Uri.TryCreate(requested, UriKind.Absolute, out var uri) || uri.Scheme != "https" || uri.AbsolutePath != "/v1" || uri.UserInfo.Length > 0 || !uri.IsDefaultPort || uri.Query.Length > 0 || uri.Fragment.Length > 0 || uri.Host is not ("api.moonshot.ai" or "api.moonshot.cn"))
                 throw new ArgumentException("Moonshot API 地址必须是 https://api.moonshot.ai/v1 或 https://api.moonshot.cn/v1");
             baseUrl = requested;
         }
@@ -135,21 +160,39 @@ public sealed class OAuth
                     throw new ArgumentException("请填写有效的 HTTPS API 根地址；本机服务也可使用 HTTP 地址。地址中的占位符需要替换为实际配置。");
             }
         }
-        Save(p, new Token(apiKey, "", DateTimeOffset.MaxValue, AuthType: "api_key", BaseUrl: baseUrl, WorkspaceId: workspaceId));
+        else if (!string.IsNullOrWhiteSpace(input.BaseUrl))
+        {
+            baseUrl = input.BaseUrl.Trim().TrimEnd('/');
+            if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) || (uri.Scheme != "https" && !(uri.Scheme == "http" && uri.IsLoopback))
+                || uri.UserInfo.Length > 0 || uri.Query.Length > 0 || uri.Fragment.Length > 0)
+                throw new ArgumentException("请填写有效的 HTTPS API 根地址；本机服务也可使用 HTTP 地址");
+        }
+        SaveCore(p, new Token(apiKey, "", DateTimeOffset.MaxValue, AuthType: "api_key", BaseUrl: baseUrl, WorkspaceId: workspaceId));
+        Invalidate(p);
         return Status(p);
+        }
     }
     public static string Random() => Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     public static string Challenge(string verifier) => Convert.ToBase64String(SHA256.HashData(Encoding.ASCII.GetBytes(verifier))).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     public async Task<LoginState> Start(string p, CancellationToken ct)
     {
-        p = ModelCatalog.Driver(p);
+        p = Provider(p);
+        if (!AuthMethods(p).Any(method => method.Type == "oauth"))
+            throw new ArgumentException("该提供商不支持订阅授权，请使用 API Key；已有凭据保留");
+        var owner = Capture(p);
+        ct.ThrowIfCancellationRequested();
         var spec = SpecFor(p);
         string id = Guid.NewGuid().ToString("N");
-        foreach (var existing in logins.Values)
-        if (existing.Provider == p && existing.Status == "pending" && pending.TryGetValue(existing.Id, out var active) && active.Deadline > DateTimeOffset.UtcNow)
-            return existing;
+        lock (credentialGate)
+            foreach (var existing in logins.Values)
+                if (existing.Provider == p && existing.Status == "pending" && pending.TryGetValue(existing.Id, out var active)
+                    && Current(active.Owner) && active.Deadline > DateTimeOffset.UtcNow)
+                    return existing;
         if (p is "openai" or "anthropic")
         {
+            lock (credentialGate)
+            {
+            if (!Current(owner)) throw new OperationCanceledException("连接已被移除或替换");
             string state = Random(), verifier = Random();
             TcpListener? listener = null;
             string redirect = "https://platform.claude.com/oauth/code/callback";
@@ -163,12 +206,12 @@ public sealed class OAuth
             string nonce = "";
             if (p == "openai")
             {
-                string registration = Path.Combine(Files.Root, "openai-client-id");
+                string registration = Path.Combine(CredentialRoot(Files.Root), "openai-client-id");
                 string client = File.Exists(registration) ? File.ReadAllText(registration).Trim() : spec.Client;
                 values["client_id"] = client;
                 if (client == "dynamic_agent_client")
                     values["agent_name_hint"] = "Tohotopia Model Battle";
-                string host = Path.Combine(Files.Root, "openai-host-id");
+                string host = Path.Combine(CredentialRoot(Files.Root), "openai-host-id");
                 if (!File.Exists(host))
                     File.WriteAllText(host, "urn:uuid:" + Guid.NewGuid());
                 values["ext_agent_host_id"] = File.ReadAllText(host).Trim();
@@ -181,30 +224,58 @@ public sealed class OAuth
             string url = QueryHelpers.AddQueryString(p == "openai" ? "https://auth.openai.com/api/accounts/authorize" : "https://claude.ai/oauth/authorize", values);
             var login = new LoginState(id, p, url, "", "pending", p == "openai" ? "请在浏览器登录 ChatGPT，授权后自动返回。" : "请在浏览器授权，然后粘贴返回的完整回调地址或 code#state。");
             logins[id] = login;
-            pending[id] = new(p, state, verifier, redirect, DateTimeOffset.UtcNow.AddMinutes(10), nonce);
+            var flow = new Pending(p, state, verifier, redirect, DateTimeOffset.UtcNow.AddMinutes(10), owner, new CancellationTokenSource(TimeSpan.FromMinutes(10)), nonce);
+            pending[id] = flow;
             if (listener != null)
-                _ = Listen(id, listener);
+                _ = Listen(id, listener, flow);
             return login;
+            }
         }
         var fields = new Dictionary<string, string> { { "client_id", spec.Client } };
         if (spec.Scope != "")
             fields["scope"] = spec.Scope;
         using var response = await Form(p, spec.Device, fields, ct);
         Ensure(response, "设备授权");
-        var d = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
+        var d = await response.Content.ReadFromJsonAsync(HostJson.Type<JsonElement>(HostJson.Plain), ct);
         string auth = d.TryGetProperty("verification_uri_complete", out var complete) ? complete.GetString()! : d.GetProperty("verification_uri").GetString()!;
         if (!Uri.TryCreate(auth, UriKind.Absolute, out var uri) || uri.Scheme != "https")
             throw new InvalidOperationException("Invalid authorization URL");
         var deviceLogin = new LoginState(id, p, auth, d.GetProperty("user_code").GetString()!, "pending", "请在浏览器授权此设备。");
-        logins[id] = deviceLogin;
         string device = d.GetProperty("device_code").GetString()!;
         int interval = d.TryGetProperty("interval", out var i) ? i.GetInt32() : 5, lifetime = d.TryGetProperty("expires_in", out var ex) ? ex.GetInt32() : 300;
-        _ = Task.Run(async () => { try { var deadline = DateTimeOffset.UtcNow.AddSeconds(lifetime); while (DateTimeOffset.UtcNow < deadline) { await Task.Delay(TimeSpan.FromSeconds(Math.Max(interval, 1))); using var r = await Form(p, spec.Token, new() { { "client_id", spec.Client }, { "device_code", device }, { "grant_type", "urn:ietf:params:oauth:grant-type:device_code" } }, CancellationToken.None); var b = await r.Content.ReadFromJsonAsync<JsonElement>(); if (r.IsSuccessStatusCode) { Save(p, Parse(b)); logins[id] = deviceLogin with { Status = "connected", Message = "已连接" }; return; } string error = b.TryGetProperty("error", out var err) ? err.GetString()! : "unknown"; if (error == "slow_down") { interval += 5; continue; } if (error != "authorization_pending") throw new InvalidOperationException("授权失败：" + error); } throw new TimeoutException("授权已过期"); } catch (Exception e) { logins[id] = deviceLogin with { Status = "failed", Message = e.Message }; } });
+        lock (credentialGate)
+        {
+            if (!Current(owner)) throw new OperationCanceledException("连接已被移除或替换");
+            var flow = new Pending(p, "", "", "", DateTimeOffset.UtcNow.AddSeconds(lifetime), owner, new CancellationTokenSource(TimeSpan.FromSeconds(lifetime)));
+            logins[id] = deviceLogin;
+            pending[id] = flow;
+            _ = PollDevice(id, device, spec, interval, flow);
+        }
         return deviceLogin;
     }
-    async Task Listen(string id, TcpListener listener)
+    async Task PollDevice(string id, string device, Spec spec, int interval, Pending flow)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        var ct = flow.Cancellation.Token;
+        try
+        {
+            while (DateTimeOffset.UtcNow < flow.Deadline)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(Math.Max(interval, 1)), ct);
+                using var r = await Form(flow.Provider, spec.Token, new() { { "client_id", spec.Client }, { "device_code", device }, { "grant_type", "urn:ietf:params:oauth:grant-type:device_code" } }, ct);
+                var b = await r.Content.ReadFromJsonAsync(HostJson.Type<JsonElement>(HostJson.Plain), ct);
+                if (r.IsSuccessStatusCode) { Commit(flow.Owner, Parse(b), login: id); return; }
+                string error = b.TryGetProperty("error", out var err) ? err.GetString()! : "unknown";
+                if (error == "slow_down") { interval += 5; continue; }
+                if (error != "authorization_pending") throw new InvalidOperationException("授权失败");
+            }
+            throw new TimeoutException();
+        }
+        catch (Exception) { Fail(id, flow, "授权已取消、失败或过期；已有凭据保留"); }
+        finally { flow.Cancellation.Dispose(); }
+    }
+    async Task Listen(string id, TcpListener listener, Pending flow)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(flow.Cancellation.Token);
         try
         {
             while (pending.ContainsKey(id))
@@ -238,25 +309,28 @@ public sealed class OAuth
                 await stream.WriteAsync(body, timeout.Token);
             }
         }
-        catch (Exception e) { logins[id] = logins[id] with { Status = "failed", Message = e is OperationCanceledException ? "授权已过期" : e.Message }; }
-        finally { listener.Stop(); pending.TryRemove(id, out _); }
+        catch (Exception) { Fail(id, flow, "授权已取消、失败或过期；已有凭据保留"); }
+        finally { listener.Stop(); pending.TryRemove(id, out _); flow.Cancellation.Dispose(); }
     }
     public async Task<LoginState> Complete(string id, string input, CancellationToken ct)
     {
-        if (!pending.TryGetValue(id, out var p) || p.Deadline < DateTimeOffset.UtcNow)
+        if (!pending.TryGetValue(id, out var p) || p.State.Length == 0 || p.Deadline < DateTimeOffset.UtcNow)
             throw new ArgumentException("授权请求不存在或已过期");
         var (code, state) = ParseCallback(input);
         if (state != p.State || string.IsNullOrWhiteSpace(code))
             throw new ArgumentException("OAuth state 不匹配");
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, p.Cancellation.Token);
+        ct = linked.Token;
+        try
+        {
         var s = SpecFor(p.Provider);
         string client = s.Client;
         if (p.Provider == "openai")
         {
-            string registration = Path.Combine(Files.Root, "openai-client-id");
+            string registration = Path.Combine(CredentialRoot(Files.Root), "openai-client-id");
             if (Uri.TryCreate(input, UriKind.Absolute, out var callback) && QueryHelpers.ParseQuery(callback.Query).TryGetValue("client_id", out var issued) && !string.IsNullOrWhiteSpace(issued))
             {
                 client = issued.ToString();
-                File.WriteAllText(registration, client);
             }
             else if (File.Exists(registration))
                 client = File.ReadAllText(registration).Trim();
@@ -270,7 +344,7 @@ public sealed class OAuth
             fields["state"] = state;
         using var response = await Form(p.Provider, s.Token, fields, ct);
         Ensure(response, "令牌交换");
-        var b = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
+        var b = await response.Content.ReadFromJsonAsync(HostJson.Type<JsonElement>(HostJson.Plain), ct);
         var token = Parse(b);
         if (p.Provider == "openai")
         {
@@ -287,15 +361,14 @@ public sealed class OAuth
                 AccountId = ""
             };
         }
-        Save(p.Provider, token);
-        pending.TryRemove(id, out _);
-        return logins[id] = logins[id] with
+        lock (credentialGate)
         {
-            Status = "connected",
-            Message = "已连接",
-            Code = "",
-            Url = ""
-        };
+            ct.ThrowIfCancellationRequested();
+            Commit(p.Owner, token, p.Provider == "openai" ? client : "", id);
+            return logins[id];
+        }
+        }
+        catch (Exception) { Fail(id, p, "授权已取消或失败；已有凭据保留"); throw; }
     }
     public static (string Code, string State) ParseCallback(string input)
     {
@@ -312,7 +385,7 @@ public sealed class OAuth
     }
     async Task<HttpResponseMessage> Form(string p, string url, Dictionary<string, string> fields, CancellationToken ct)
     {
-        using var req = new HttpRequestMessage(HttpMethod.Post, url) { Content = p == "anthropic" ? JsonContent.Create(fields) : new FormUrlEncodedContent(fields) };
+        using var req = new HttpRequestMessage(HttpMethod.Post, url) { Content = p == "anthropic" ? JsonContent.Create(fields, HostJson.Type<Dictionary<string, string>>(HostJson.Plain)) : new FormUrlEncodedContent(fields) };
         req.Headers.UserAgent.ParseAdd("TohotopiaLLM/0.2");
         if (p == "kimi")
         {
@@ -340,28 +413,33 @@ public sealed class OAuth
         }
         catch { return previous; }
     }
-    static void Save(string p, Token t)
+    static void SaveCore(string p, Token t)
     {
-        Directory.CreateDirectory(Files.Root);
-        string path = Path.Combine(Files.Root, p + ".token");
-        File.WriteAllBytes(path + ".tmp", ProtectedData.Protect(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(t)), null, DataProtectionScope.CurrentUser));
+        Directory.CreateDirectory(CredentialRoot(Files.Root));
+        string path = CredentialPath(p, ".token");
+        File.WriteAllBytes(path + ".tmp", ProtectedData.Protect(JsonSerializer.SerializeToUtf8Bytes(t, HostJson.Type<Token>(HostJson.Plain)), null, DataProtectionScope.CurrentUser));
         File.Move(path + ".tmp", path, true);
-        TohotopiaShared.RoomFiles.Write(Files.Root, p + "-auth-status.json", new AccountStatus(p, true, t.AuthType == "api_key" ? "configured" : "connected", t.AuthType == "api_key" ? "API Key 已加密保存" : "登录凭据已加密保存", t.AuthType == "api_key" ? null : t.Expires, t.Refresh.Length > 0, true, t.AuthType));
+        TohotopiaShared.RoomFiles.Write(CredentialRoot(Files.Root), p + "-auth-status.json", new AccountStatus(p, true, t.AuthType == "api_key" ? "configured" : "connected", t.AuthType == "api_key" ? "API Key 已加密保存" : "登录凭据已加密保存", t.AuthType == "api_key" ? null : t.Expires, t.Refresh.Length > 0, true, t.AuthType));
         TohotopiaShared.AgentEvents.Write(Files.Root, new(DateTimeOffset.UtcNow, "host", "auth_saved", "连接凭据已加密保存", Provider: p));
     }
-    Token Load(string p) => JsonSerializer.Deserialize<Token>(ProtectedData.Unprotect(File.ReadAllBytes(Path.Combine(Files.Root, p + ".token")), null, DataProtectionScope.CurrentUser))!;
+    Token Load(string p) => JsonSerializer.Deserialize(ProtectedData.Unprotect(File.ReadAllBytes(CredentialPath(p, ".token")), null, DataProtectionScope.CurrentUser), HostJson.Type<Token>(HostJson.Plain))!;
     public async Task<Token> Credentials(string p, CancellationToken ct, bool force = false)
     {
-        p = ModelCatalog.Driver(p);
+        p = Provider(p);
         if (AuthMethods(p).Length == 0) throw new ArgumentException("该提供商没有可用的认证方式");
         await refreshLock.WaitAsync(ct);
         bool refreshing = false;
+        Lease? owner = null;
         try
         {
-            string path = Path.Combine(Files.Root, p + ".token");
+            Token t;
+            lock (credentialGate)
+            {
+            owner = Capture(p);
+            string path = CredentialPath(p, ".token");
             if (!File.Exists(path))
                 throw new InvalidOperationException("请先在设置窗口配置 " + p);
-            var t = Load(p);
+            t = Load(p);
             if (t.AuthType == "api_key")
             {
                 if (string.IsNullOrWhiteSpace(t.Access))
@@ -370,29 +448,43 @@ public sealed class OAuth
             }
             if (p == "openai" && !t.Scope.Split(' ').Contains("chatgpt.tokens.use.direct"))
                 throw new InvalidOperationException("请重新登录 ChatGPT 并授予套餐使用权限，旧 Codex 登录不能用于模型对战");
+            if (t.AuthType != "subscription" || !AuthMethods(p).Any(method => method.Type == "oauth"))
+                throw new InvalidOperationException("该提供商不支持已保存的订阅凭据，请配置 API Key");
             if (!force && t.Expires > DateTimeOffset.UtcNow.AddMinutes(3))
                 return t;
             if (t.Refresh.Length == 0)
                 throw new InvalidOperationException("授权已过期且没有刷新令牌，请重新登录");
             refreshing = true;
+            }
             var s = SpecFor(p);
             var fields = new Dictionary<string, string> { { "client_id", p == "openai" ? t.ClientId : s.Client }, { "grant_type", "refresh_token" }, { "refresh_token", t.Refresh } };
             if (p == "openai")
                 fields["resource"] = "https://api.openai.com/v1";
             using var r = await Form(p, s.Token, fields, ct);
             Ensure(r, "令牌刷新");
-            var b = await r.Content.ReadFromJsonAsync<JsonElement>(ct);
+            var b = await r.Content.ReadFromJsonAsync(HostJson.Type<JsonElement>(HostJson.Plain), ct);
             var refreshed = Parse(b, t.Refresh, t.AccountId);
             t = refreshed with
             {
                 ClientId = t.ClientId,
                 Scope = b.TryGetProperty("scope", out var scope) ? scope.GetString() ?? t.Scope : t.Scope,
-                IdToken = b.TryGetProperty("id_token", out var id) ? id.GetString() ?? t.IdToken : t.IdToken
+                IdToken = b.TryGetProperty("id_token", out var id) ? id.GetString() ?? t.IdToken : t.IdToken,
+                AuthType = t.AuthType, BaseUrl = t.BaseUrl, WorkspaceId = t.WorkspaceId
             };
-            Save(p, t);
+            ct.ThrowIfCancellationRequested();
+            Commit(owner!, t);
             return t;
         }
-        catch (Exception) { if (refreshing && !ct.IsCancellationRequested) { TohotopiaShared.RoomFiles.Write(Files.Root, p + "-auth-status.json", new AccountStatus(p, false, "refresh_failed", "凭据刷新失败；保留已有登录，可重试检查。")); TohotopiaShared.AgentEvents.Write(Files.Root, new(DateTimeOffset.UtcNow, "host", "auth_refresh_failed", "凭据刷新失败；已有凭据保留", "error", Provider: p)); } throw; }
+        catch (Exception)
+        {
+            lock (credentialGate)
+                if (refreshing && !ct.IsCancellationRequested && owner != null && Current(owner) && File.Exists(Path.Combine(CredentialRoot(owner.Root), p + ".token")))
+                {
+                    TohotopiaShared.RoomFiles.Write(CredentialRoot(Files.Root), p + "-auth-status.json", new AccountStatus(p, false, "refresh_failed", "凭据刷新失败；保留已有登录，可重试检查。"));
+                    TohotopiaShared.AgentEvents.Write(Files.Root, new(DateTimeOffset.UtcNow, "host", "auth_refresh_failed", "凭据刷新失败；已有凭据保留", "error", Provider: p));
+                }
+            throw;
+        }
         finally { refreshLock.Release(); }
     }
     static byte[] Decode(string s)

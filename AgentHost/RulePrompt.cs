@@ -17,7 +17,7 @@ public sealed class RulePrompt
         try
         {
             using var stream = new FileStream(Path.Combine(directory, "game-rules.json"), FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            entries = JsonSerializer.Deserialize<GameRulesExport>(stream, RoomFiles.Json)?.Entries ?? new();
+            entries = JsonSerializer.Deserialize(stream, HostJson.Type<GameRulesExport>(RoomFiles.Json))?.Entries ?? new();
         }
         catch (Exception error) when (error is IOException or JsonException or UnauthorizedAccessException) { }
     }
@@ -45,8 +45,8 @@ public sealed class RulePrompt
                         string code = tech?.GetValue<string>() ?? "";
                         if (code == "None") continue;
                         var rule = Find(code, "technology");
-                        names.Add(rule is null ? new JsonObject { ["code"] = code, ["name"] = "未知科技名称" }
-                            : new JsonObject { ["id"] = rule.Id, ["name"] = rule.Name });
+                        names.Add((JsonNode)(rule is null ? new JsonObject { ["code"] = code, ["name"] = "未知科技名称" }
+                            : new JsonObject { ["id"] = rule.Id, ["name"] = rule.Name }));
                     }
                     player["technologies"] = names;
                 }
@@ -64,10 +64,10 @@ public sealed class RulePrompt
             "LearnTech" => "学习科技", "UnitMove" => "移动", "UnitAttack" => "攻击", "Build" => "建造",
             "EndTurn" => "结束回合", "SendPublicMessage" => "公共消息", "SendTeamMessage" => "队内消息", _ => c.Kind
         };
-        return new { c.Id, name = verb + (rules.Length > 0 ? "「" + string.Join("、", rules.Select(r => r!.Name).Distinct()) + "」" : ""), c.Kind,
+        return new CandidatePrompt(c.Id, verb + (rules.Length > 0 ? "「" + string.Join("、", rules.Select(r => r!.Name).Distinct()) + "」" : ""), c.Kind,
             c.UnitId, c.CityId, c.GridId, c.TargetUnitId, c.TargetGridId, c.TargetPlayerId,
-            ruleIds = references, description };
-    }), Json);
+            references, description);
+    }).ToArray(), HostJson.Type<CandidatePrompt[]>(Json));
     public string Relevant(IEnumerable<Candidate> candidates, JsonElement observation)
     {
         var selected = candidates.SelectMany(References).Select(id => Find(id)).Where(r => r != null).Cast<GameRule>().DistinctBy(r => r.Id).Take(8).ToList();

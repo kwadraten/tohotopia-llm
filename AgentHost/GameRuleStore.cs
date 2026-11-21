@@ -24,7 +24,7 @@ public sealed class GameRuleStore
         {
             if (!File.Exists(path)) return new(null, "本局尚未导出本地规则资料。");
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            var data = JsonSerializer.Deserialize<GameRulesExport>(stream, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            var data = JsonSerializer.Deserialize(stream, HostJson.Type<GameRulesExport>(TohotopiaShared.RoomFiles.Json));
             return data?.Entries is { Count: > 0 }
                 ? new(data, null)
                 : new(null, "本地规则资料为空或格式无效。");

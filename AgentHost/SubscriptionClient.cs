@@ -35,7 +35,7 @@ public sealed partial class SubscriptionClient : IChatClient
                 new OAuthBearerCredentials(oauth, "openai"),
                 null,
                 new ReasoningSummaryTransport(new OutputTokenTransport(this.config, "openai-responses", new FSharp.ModelsDev.HttpChatTransport(http)), requestReasoningSummary, progressWriter));
-            modelsDevClient = providerFactory.CreateClient("openai", "tohotopia", this.config.Model, providerOptions).AsIChatClient();
+            modelsDevClient = providerFactory.CreateClient("openai", "tohotopia", this.config.Model, providerOptions).AsIChatClient(Files.Json);
         }
         else if (this.config.Provider is not ("anthropic" or "grok" or "kimi" or "moonshotai")
             && !string.IsNullOrWhiteSpace(this.config.Model)
@@ -49,7 +49,7 @@ public sealed partial class SubscriptionClient : IChatClient
             var factory = new ProviderFactory(ProviderConnections.Catalog,
                 new OAuthBearerCredentials(oauth, this.config.Provider, definition.ProtocolId),
                 null, new OutputTokenTransport(this.config, definition.ProtocolId, new FSharp.ModelsDev.HttpChatTransport(http)));
-            modelsDevClient = factory.CreateClient(this.config.Provider, "tohotopia", this.config.Model, providerOptions).AsIChatClient();
+            modelsDevClient = factory.CreateClient(this.config.Provider, "tohotopia", this.config.Model, providerOptions).AsIChatClient(Files.Json);
         }
     }
     public object? GetService(Type serviceType, object? serviceKey = null) => serviceKey == null && serviceType.IsInstanceOfType(this) ? this : null;
@@ -102,17 +102,14 @@ public sealed partial class SubscriptionClient : IChatClient
             assistant = await Anthropic(list, tools, options, cancellationToken);
         else if (config.Provider is "grok" or "kimi" or "moonshotai")
         {
-            var body = new Dictionary<string, object> { { "model", config.Model }, { "stream", progressWriter is not null }, { "messages", OpenAIChatMessages(list) }, { "max_tokens", 4096 } };
+            var body = new JsonObject { ["model"] = config.Model, ["stream"] = progressWriter is not null, ["messages"] = OpenAIChatMessages(list), ["max_tokens"] = 4096 };
             AddOpenAIChatTools(body, tools, options);
             if (config.Provider == "grok" && config.Reasoning != "default")
                 body["reasoning_effort"] = config.Reasoning;
             if (config.Provider == "kimi")
-                body["thinking"] = new
-                {
-                    type = config.Reasoning == "none" ? "disabled" : "enabled"
-                };
+                body["thinking"] = new JsonObject { ["type"] = config.Reasoning == "none" ? "disabled" : "enabled" };
             else if (config.Provider == "moonshotai" && config.Model.Contains("k2.6", StringComparison.OrdinalIgnoreCase))
-                body["thinking"] = new { type = config.Reasoning == "none" ? "disabled" : "enabled" };
+                body["thinking"] = new JsonObject { ["type"] = config.Reasoning == "none" ? "disabled" : "enabled" };
             else if (config.Provider == "moonshotai" && config.Model.Contains("k3", StringComparison.OrdinalIgnoreCase) && config.Reasoning != "default")
                 body["reasoning_effort"] = config.Reasoning;
             string endpoint = config.Provider switch
@@ -288,9 +285,9 @@ public sealed partial class SubscriptionClient : IChatClient
             contents.Add(new TextContent("规则查询次数已达上限；请依据已查资料作答，未查明的规则明确标为未知。"));
         return new ChatMessage(ChatRole.Assistant, contents);
     }
-    public static object OpenAIBody(AgentConfig config, IReadOnlyList<ChatMessage> messages, IReadOnlyList<AIFunction>? tools = null, ChatOptions? options = null)
+    public static JsonObject OpenAIBody(AgentConfig config, IReadOnlyList<ChatMessage> messages, IReadOnlyList<AIFunction>? tools = null, ChatOptions? options = null)
     {
-        var body = new Dictionary<string, object>
+        var body = new JsonObject
         {
             ["model"] = config.Model,
             ["instructions"] = string.Join("\n", messages.Where(m => m.Role == ChatRole.System).Select(m => m.Text)),
@@ -303,12 +300,9 @@ public sealed partial class SubscriptionClient : IChatClient
         };
         if (config.Reasoning != "default")
         {
-            body["reasoning"] = new
-            {
-                effort = config.Reasoning
-            };
+            body["reasoning"] = new JsonObject { ["effort"] = config.Reasoning };
             if (config.Reasoning != "none")
-                body["include"] = new[] { "reasoning.encrypted_content" };
+                body["include"] = new JsonArray("reasoning.encrypted_content");
         }
         return body;
     }
@@ -320,19 +314,15 @@ public sealed partial class SubscriptionClient : IChatClient
     }
     async Task<ChatMessage> Anthropic(IReadOnlyList<ChatMessage> messages, IReadOnlyList<AIFunction> tools, ChatOptions? options, CancellationToken ct)
     {
-        var body = new Dictionary<string, object> { { "model", config.Model }, { "system", string.Join("\n", messages.Where(m => m.Role == ChatRole.System).Select(m => m.Text)) }, { "messages", AnthropicMessages(messages.Where(m => m.Role != ChatRole.System)) }, { "max_tokens", 8192 }, { "stream", progressWriter is not null }, { "tools", AnthropicTools(tools) } };
+        var body = new JsonObject { ["model"] = config.Model, ["system"] = string.Join("\n", messages.Where(m => m.Role == ChatRole.System).Select(m => m.Text)), ["messages"] = AnthropicMessages(messages.Where(m => m.Role != ChatRole.System)), ["max_tokens"] = 8192, ["stream"] = progressWriter is not null, ["tools"] = AnthropicTools(tools) };
         if (tools.Count > 0)
-            body["tool_choice"] = options?.AllowMultipleToolCalls == false ? new { type = "auto", disable_parallel_tool_use = true } : new { type = "auto" };
+            body["tool_choice"] = new JsonObject { ["type"] = "auto" };
+        if (tools.Count > 0 && options?.AllowMultipleToolCalls == false)
+            body["tool_choice"]!["disable_parallel_tool_use"] = true;
         if (config.Reasoning is not "none" and not "default")
         {
-            body["thinking"] = new
-            {
-                type = "adaptive"
-            };
-            body["output_config"] = new
-            {
-                effort = config.Reasoning
-            };
+            body["thinking"] = new JsonObject { ["type"] = "adaptive" };
+            body["output_config"] = new JsonObject { ["effort"] = config.Reasoning };
         }
         using var response = await Send("https://api.anthropic.com/v1/messages", body, ct, progressWriter is not null);
         if (IsEventStream(response))
@@ -340,13 +330,13 @@ public sealed partial class SubscriptionClient : IChatClient
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
         return ParseAnthropicMessage(doc.RootElement.GetProperty("content"));
     }
-    async Task<HttpResponseMessage> Send(string endpoint, object body, CancellationToken ct, bool sse = false)
+    async Task<HttpResponseMessage> Send(string endpoint, JsonObject body, CancellationToken ct, bool sse = false)
     {
         for (int attempt = 0; attempt < 2; attempt++)
         {
             var token = await oauth.Credentials(config.Provider, ct, attempt > 0);
             string protocol = config.Provider == "anthropic" ? "anthropic-messages" : "openai-chat";
-            string payload = OutputTokenPolicy.Apply(config, protocol, JsonSerializer.Serialize(body));
+            string payload = OutputTokenPolicy.Apply(config, protocol, body.ToJsonString());
             using var request = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = new StringContent(payload, Encoding.UTF8, "application/json") };
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Access);
             request.Headers.UserAgent.ParseAdd("TohotopiaLLM/0.2");
@@ -455,81 +445,95 @@ public sealed partial class SubscriptionClient : IChatClient
         // Some subscription streams omit the final output snapshot. The item.done
         // events still contain the authoritative completed function calls/messages.
         if ((result is null || !result.Contents.Any()) && completedItems.Count > 0)
-            result = ParseOpenAIResponseOutput(JsonSerializer.SerializeToElement(completedItems.Values));
+            result = ParseOpenAIResponseOutput(JsonSerializer.SerializeToElement(completedItems.Values.ToArray(), HostJson.Type<JsonElement[]>(HostJson.Plain)));
         if (result is not null && (result.Text.Length > 0 || result.Contents.Any(c => c is FunctionCallContent)))
             return result;
         return new ChatMessage(ChatRole.Assistant, result?.Text.Length > 0 ? result.Text : delta.ToString());
     }
 
-    static object[] OpenAIResponseTools(IReadOnlyList<AIFunction> tools) => tools.Select(t => (object)new { type = "function", name = t.Name, description = t.Description, parameters = t.JsonSchema }).ToArray();
-    static object[] AnthropicTools(IReadOnlyList<AIFunction> tools) => tools.Select(t => (object)new { name = t.Name, description = t.Description, input_schema = t.JsonSchema }).ToArray();
-    static void AddOpenAIChatTools(Dictionary<string, object> body, IReadOnlyList<AIFunction> tools, ChatOptions? options)
+    static JsonObject ToolDefinition(AIFunction tool) => new()
+    {
+        ["name"] = tool.Name, ["description"] = tool.Description, ["parameters"] = HostJson.Node(tool.JsonSchema)
+    };
+    static JsonArray OpenAIResponseTools(IReadOnlyList<AIFunction> tools) => new(tools.Select(t =>
+    {
+        var definition = ToolDefinition(t);
+        definition["type"] = "function";
+        return (JsonNode)definition;
+    }).ToArray());
+    static JsonArray AnthropicTools(IReadOnlyList<AIFunction> tools) => new(tools.Select(t => (JsonNode)new JsonObject
+    {
+        ["name"] = t.Name, ["description"] = t.Description, ["input_schema"] = HostJson.Node(t.JsonSchema)
+    }).ToArray());
+    static void AddOpenAIChatTools(JsonObject body, IReadOnlyList<AIFunction> tools, ChatOptions? options)
     {
         if (tools.Count == 0) return;
-        body["tools"] = tools.Select(t => (object)new { type = "function", function = new { name = t.Name, description = t.Description, parameters = t.JsonSchema } }).ToArray();
+        body["tools"] = new JsonArray(tools.Select(t => (JsonNode)new JsonObject { ["type"] = "function", ["function"] = ToolDefinition(t) }).ToArray());
         body["tool_choice"] = "auto";
         body["parallel_tool_calls"] = options?.AllowMultipleToolCalls ?? false;
     }
-    static object[] OpenAIResponsesInput(IEnumerable<ChatMessage> messages)
+    static JsonArray OpenAIResponsesInput(IEnumerable<ChatMessage> messages)
     {
-        var result = new List<object>();
+        var result = new JsonArray();
         foreach (var m in messages)
         {
-            var content = new List<object>();
+            var content = new JsonArray();
             foreach (var c in m.Contents ?? Array.Empty<AIContent>())
             {
                 if (c is FunctionCallContent call)
-                    result.Add(new { type = "function_call", call_id = call.CallId, name = call.Name, arguments = JsonSerializer.Serialize(call.Arguments) });
+                    result.Add((JsonNode)new JsonObject { ["type"] = "function_call", ["call_id"] = call.CallId, ["name"] = call.Name, ["arguments"] = HostJson.SerializeValue(call.Arguments) });
                 else if (c is FunctionResultContent fr)
-                    result.Add(new { type = "function_call_output", call_id = fr.CallId, output = ResultText(fr.Result) });
+                    result.Add((JsonNode)new JsonObject { ["type"] = "function_call_output", ["call_id"] = fr.CallId, ["output"] = ResultText(fr.Result) });
             }
             if (!string.IsNullOrEmpty(m.Text))
-                content.Add(new { type = m.Role == ChatRole.Assistant ? "output_text" : "input_text", text = m.Text });
+                content.Add((JsonNode)new JsonObject { ["type"] = m.Role == ChatRole.Assistant ? "output_text" : "input_text", ["text"] = m.Text });
             if (content.Count > 0)
-                result.Add(new { type = "message", role = m.Role == ChatRole.Assistant ? "assistant" : "user", content });
+                result.Add((JsonNode)new JsonObject { ["type"] = "message", ["role"] = m.Role == ChatRole.Assistant ? "assistant" : "user", ["content"] = content });
         }
-        return result.ToArray();
+        return result;
     }
-    static object[] OpenAIChatMessages(IEnumerable<ChatMessage> messages)
+    static JsonArray OpenAIChatMessages(IEnumerable<ChatMessage> messages)
     {
-        var result = new List<object>();
+        var result = new JsonArray();
         foreach (var m in messages)
         {
             var calls = (m.Contents ?? Array.Empty<AIContent>()).OfType<FunctionCallContent>().ToArray();
             var results = (m.Contents ?? Array.Empty<AIContent>()).OfType<FunctionResultContent>().ToArray();
             if (m.Role == ChatRole.Assistant && calls.Length > 0)
             {
-                result.Add(new { role = "assistant", content = string.IsNullOrEmpty(m.Text) ? null : m.Text, tool_calls = calls.Select(c => new { id = c.CallId, type = "function", function = new { name = c.Name, arguments = JsonSerializer.Serialize(c.Arguments) } }).ToArray() });
+                result.Add((JsonNode)new JsonObject { ["role"] = "assistant", ["content"] = string.IsNullOrEmpty(m.Text) ? null : m.Text,
+                    ["tool_calls"] = new JsonArray(calls.Select(c => (JsonNode)new JsonObject { ["id"] = c.CallId, ["type"] = "function",
+                        ["function"] = new JsonObject { ["name"] = c.Name, ["arguments"] = HostJson.SerializeValue(c.Arguments) } }).ToArray()) });
             }
             else if (results.Length > 0)
-                foreach (var r in results) result.Add(new { role = "tool", tool_call_id = r.CallId, content = ResultText(r.Result) });
+                foreach (var r in results) result.Add((JsonNode)new JsonObject { ["role"] = "tool", ["tool_call_id"] = r.CallId, ["content"] = ResultText(r.Result) });
             else if (!string.IsNullOrEmpty(m.Text))
-                result.Add(new { role = m.Role.Value, content = m.Text });
+                result.Add((JsonNode)new JsonObject { ["role"] = m.Role.Value, ["content"] = m.Text });
         }
-        return result.ToArray();
+        return result;
     }
-    static object[] AnthropicMessages(IEnumerable<ChatMessage> messages)
+    static JsonArray AnthropicMessages(IEnumerable<ChatMessage> messages)
     {
-        var result = new List<object>();
+        var result = new JsonArray();
         foreach (var m in messages)
         {
-            var content = new List<object>();
-            if (!string.IsNullOrEmpty(m.Text)) content.Add(new { type = "text", text = m.Text });
+            var content = new JsonArray();
+            if (!string.IsNullOrEmpty(m.Text)) content.Add((JsonNode)new JsonObject { ["type"] = "text", ["text"] = m.Text });
             foreach (var c in m.Contents ?? Array.Empty<AIContent>())
             {
-                if (c is FunctionCallContent call) content.Add(new { type = "tool_use", id = call.CallId, name = call.Name, input = call.Arguments });
-                if (c is FunctionResultContent fr) content.Add(new { type = "tool_result", tool_use_id = fr.CallId, content = ResultText(fr.Result) });
+                if (c is FunctionCallContent call) content.Add((JsonNode)new JsonObject { ["type"] = "tool_use", ["id"] = call.CallId, ["name"] = call.Name, ["input"] = HostJson.Node(call.Arguments) });
+                if (c is FunctionResultContent fr) content.Add((JsonNode)new JsonObject { ["type"] = "tool_result", ["tool_use_id"] = fr.CallId, ["content"] = ResultText(fr.Result) });
             }
-            if (content.Count > 0) result.Add(new { role = m.Role == ChatRole.Assistant ? "assistant" : "user", content });
+            if (content.Count > 0) result.Add((JsonNode)new JsonObject { ["role"] = m.Role == ChatRole.Assistant ? "assistant" : "user", ["content"] = content });
         }
-        return result.ToArray();
+        return result;
     }
     static string ResultText(object? result) => result switch
     {
         string s => s,
         JsonElement e when e.ValueKind == JsonValueKind.String => e.GetString() ?? "",
         JsonElement e => e.GetRawText(),
-        _ => JsonSerializer.Serialize(result)
+        _ => HostJson.SerializeValue(result)
     };
     static ChatMessage ParseOpenAIChatMessage(JsonElement m)
     {
@@ -540,7 +544,7 @@ public sealed partial class SubscriptionClient : IChatClient
             foreach (var call in calls.EnumerateArray())
             {
                 var fn = call.GetProperty("function");
-                var args = JsonSerializer.Deserialize<Dictionary<string, object?>>(fn.GetProperty("arguments").GetString() ?? "{}") ?? new();
+                var args = JsonSerializer.Deserialize(fn.GetProperty("arguments").GetString() ?? "{}", HostJson.Type<Dictionary<string, object?>>(HostJson.Plain)) ?? new();
                 content.Add(new FunctionCallContent(call.GetProperty("id").GetString()!, fn.GetProperty("name").GetString()!, args));
             }
         return new ChatMessage(ChatRole.Assistant, content);
@@ -553,7 +557,7 @@ public sealed partial class SubscriptionClient : IChatClient
             if (b.GetProperty("type").GetString() == "text") content.Add(new TextContent(b.GetProperty("text").GetString() ?? ""));
             else if (b.GetProperty("type").GetString() == "tool_use")
             {
-                var args = JsonSerializer.Deserialize<Dictionary<string, object?>>(b.GetProperty("input").GetRawText()) ?? new();
+                var args = JsonSerializer.Deserialize(b.GetProperty("input").GetRawText(), HostJson.Type<Dictionary<string, object?>>(HostJson.Plain)) ?? new();
                 content.Add(new FunctionCallContent(b.GetProperty("id").GetString()!, b.GetProperty("name").GetString()!, args));
             }
         }
@@ -572,7 +576,7 @@ public sealed partial class SubscriptionClient : IChatClient
             }
             else if (type == "function_call")
             {
-                var args = JsonSerializer.Deserialize<Dictionary<string, object?>>(item.GetProperty("arguments").GetString() ?? "{}") ?? new();
+                var args = JsonSerializer.Deserialize(item.GetProperty("arguments").GetString() ?? "{}", HostJson.Type<Dictionary<string, object?>>(HostJson.Plain)) ?? new();
                 content.Add(new FunctionCallContent(item.GetProperty("call_id").GetString()!, item.GetProperty("name").GetString()!, args));
             }
         }

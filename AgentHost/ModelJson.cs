@@ -16,7 +16,7 @@ internal static class ModelJson
         }
         int start = text.IndexOf('{'), end = text.LastIndexOf('}');
         if (start >= 0 && end >= start) text = text[start..(end + 1)];
-        return JsonSerializer.Deserialize<T>(text, RepairOptions) ?? throw new JsonException("模型没有返回 JSON 对象");
+        return JsonSerializer.Deserialize(text, HostJson.Type<T>(RepairOptions)) ?? throw new JsonException("模型没有返回 JSON 对象");
     }
 
     internal static async Task<T> Generate<T>(Func<string?, Task<string>> generate, Action<string> retry, CancellationToken ct) where T : class

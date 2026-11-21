@@ -8,6 +8,7 @@ namespace Tohotopia;
 
 public sealed partial class SubscriptionClient
 {
+    static readonly JsonElement DoneEvent = JsonSerializer.Deserialize("{\"type\":\"done\"}", HostJson.Type<JsonElement>(HostJson.Plain));
     static bool IsEventStream(HttpResponseMessage response) => response.Content.Headers.ContentType?.MediaType == "text/event-stream";
 
     async IAsyncEnumerable<ChatResponseUpdate> ObserveUpdates(IAsyncEnumerable<ChatResponseUpdate> updates,
@@ -50,7 +51,7 @@ public sealed partial class SubscriptionClient
                 if (data.Length == 0) continue;
                 string json = data.ToString();
                 data.Clear();
-                if (json == "[DONE]") { yield return JsonSerializer.SerializeToElement(new { type = "done" }); yield break; }
+                if (json == "[DONE]") { yield return DoneEvent; yield break; }
                 using var doc = JsonDocument.Parse(json);
                 yield return doc.RootElement.Clone();
             }
@@ -62,7 +63,7 @@ public sealed partial class SubscriptionClient
         }
         if (data.Length > 0)
         {
-            if (data.ToString() == "[DONE]") yield return JsonSerializer.SerializeToElement(new { type = "done" });
+            if (data.ToString() == "[DONE]") yield return DoneEvent;
             else { using var doc = JsonDocument.Parse(data.ToString()); yield return doc.RootElement.Clone(); }
         }
     }
@@ -110,7 +111,7 @@ public sealed partial class SubscriptionClient
         {
             ["id"] = c.Id, ["type"] = "function", ["function"] = new JsonObject { ["name"] = c.Name, ["arguments"] = c.Arguments.ToString() }
         }).ToArray());
-        return ParseOpenAIChatMessage(JsonSerializer.SerializeToElement(message));
+        return ParseOpenAIChatMessage(JsonSerializer.SerializeToElement(message, HostJson.Type<JsonObject>(HostJson.Plain)));
     }
 
     async Task<ChatMessage> ReadAnthropicStream(Stream stream, CancellationToken ct)
@@ -151,6 +152,6 @@ public sealed partial class SubscriptionClient
         if (!completed) throw new InvalidOperationException("模型响应流提前结束，未收到完成事件");
         foreach (var (i, json) in arguments)
             if (json.Length > 0) blocks[i]["input"] = JsonNode.Parse(json.ToString());
-        return ParseAnthropicMessage(JsonSerializer.SerializeToElement(blocks.Values));
+        return ParseAnthropicMessage(JsonSerializer.SerializeToElement(blocks.Values.ToArray(), HostJson.Type<JsonObject[]>(HostJson.Plain)));
     }
 }

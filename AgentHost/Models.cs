@@ -24,6 +24,8 @@ public record LoginState(string Id, string Provider, string Url, string Code, st
 public record OAuthCompletion(string Input);
 public record AccountStatus(string Provider, bool Connected, string Status, string Message, DateTimeOffset? Expires = null, bool RefreshAvailable = false, bool Configured = false, string AuthType = "subscription");
 public record ApiKeyRequest(string ApiKey, string BaseUrl = "", string WorkspaceId = "");
+public record CredentialInfo(string Provider, string AuthType, string BaseUrl, string WorkspaceId, bool HasSecret);
+public record PingResult(bool Success, string Provider, string Model, long ElapsedMs, string Reply, string Error);
 public record CatalogModel(string Id, string Name, bool Reasoning, string[] Efforts);
 public record AuthPromptOption(string Label, string Value);
 public record ProviderAuthPrompt(string Type, string Key, string Message, string? Placeholder = null, bool Required = false, AuthPromptOption[]? Options = null, string? DefaultValue = null);
@@ -32,13 +34,27 @@ public record CatalogProvider(string Id, string Name, bool ConnectionSupported, 
 public static class Files
 {
     public static string Root = "";
+#if AGENT_HOST
+    public static readonly JsonSerializerOptions Json = HostJson.Options;
+    public static AgentConfig Config => File.Exists(Path.Combine(Root, "settings.json")) ? JsonSerializer.Deserialize(File.ReadAllText(Path.Combine(Root, "settings.json")), HostJson.Type<AgentConfig>(Json))! : new();
+#elif SETTINGS_APP
+    public static readonly JsonSerializerOptions Json = Settings.SettingsJson.Options;
+    public static AgentConfig Config => File.Exists(Path.Combine(Root, "settings.json")) ? JsonSerializer.Deserialize(File.ReadAllText(Path.Combine(Root, "settings.json")), Settings.SettingsJson.Type<AgentConfig>())! : new();
+#else
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true, TypeInfoResolver = new DefaultJsonTypeInfoResolver() };
     public static AgentConfig Config => File.Exists(Path.Combine(Root, "settings.json")) ? JsonSerializer.Deserialize<AgentConfig>(File.ReadAllText(Path.Combine(Root, "settings.json")), Json)! : new();
+#endif
     public static void Save(AgentConfig c)
     {
         Directory.CreateDirectory(Root);
         var f = Path.Combine(Root, "settings.json");
+#if AGENT_HOST
+        File.WriteAllText(f + ".tmp", JsonSerializer.Serialize(c, HostJson.Type<AgentConfig>(Json)));
+#elif SETTINGS_APP
+        File.WriteAllText(f + ".tmp", JsonSerializer.Serialize(c, Settings.SettingsJson.Type<AgentConfig>()));
+#else
         File.WriteAllText(f + ".tmp", JsonSerializer.Serialize(c, Json));
+#endif
         File.Move(f + ".tmp", f, true);
     }
 }

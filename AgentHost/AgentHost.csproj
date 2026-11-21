@@ -4,13 +4,24 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <DefineConstants>$(DefineConstants);AGENT_HOST</DefineConstants>
+    <EnableRequestDelegateGenerator>true</EnableRequestDelegateGenerator>
+    <PublishAot>true</PublishAot>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    <CopyOutputSymbolsToPublishDirectory Condition="'$(Configuration)' == 'Release'">false</CopyOutputSymbolsToPublishDirectory>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Agents.AI" Version="1.24.0" />
-    <PackageReference Include="FSharp.ModelsDev" Version="0.1.1" />
+    <PackageReference Include="FSharp.ModelsDev" Version="0.1.2" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
   </ItemGroup>
 
-<ItemGroup><Compile Include="..\Shared\RoomContracts.cs" Link="RoomContracts.cs" /><Compile Include="..\Shared\AgentEvents.cs" Link="AgentEvents.cs" /><Compile Include="..\Shared\ChatActions.cs" Link="ChatActions.cs" /><Compile Include="..\Shared\GameRules.cs" Link="GameRules.cs" /></ItemGroup></Project>
+<ItemGroup><Compile Include="..\Shared\RoomContracts.cs" Link="RoomContracts.cs" /><Compile Include="..\Shared\AgentEvents.cs" Link="AgentEvents.cs" /><Compile Include="..\Shared\ChatActions.cs" Link="ChatActions.cs" /><Compile Include="..\Shared\GameRules.cs" Link="GameRules.cs" /></ItemGroup>
+  <Target Name="ExcludeReleaseSymbols" AfterTargets="ComputeFilesToPublish" Condition="'$(Configuration)' == 'Release'">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb'" />
+    </ItemGroup>
+  </Target>
+</Project>
 
