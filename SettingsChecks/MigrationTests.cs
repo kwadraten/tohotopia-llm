@@ -3,79 +3,18 @@ using System.Text;
 using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Headless;
-using Avalonia.Interactivity;
-using Avalonia.LogicalTree;
 using Avalonia.Layout;
-using Avalonia.Threading;
 using Settings;
 using TKCode.Arc;
 using Tohotopia;
 using TohotopiaShared;
-using Button = TKCode.Arc.Button;
-using TabItem = TKCode.Arc.TabItem;
+using Xunit;
+using static Ui;
 
-static class Program
+public class MigrationTests
 {
-    [STAThread]
-    static void Main(string[] args)
-    {
-        if (args.Contains("--owner-helper")) { Console.ReadLine(); return; }
-        if (args.Length == 2 && args[0] == "--lifecycle") { LifecycleChecks.Run(args[1]).GetAwaiter().GetResult(); return; }
-        if (args.Length == 2 && args[0] == "--shell-launch") { LifecycleChecks.Run(args[1], throughShortcut: true).GetAwaiter().GetResult(); return; }
-        Settings.Program.UseArcTheme(AppBuilder.Configure<App>().UseHeadless(new AvaloniaHeadlessPlatformOptions()).UseHarfBuzz()).SetupWithoutStarting();
-        using var stop = new CancellationTokenSource();
-        var checks = Run();
-        _ = checks.ContinueWith(_ => stop.Cancel(), TaskScheduler.Default);
-        Dispatcher.UIThread.MainLoop(stop.Token);
-        checks.GetAwaiter().GetResult();
-    }
-    static async Task Run()
-    {
-        await MigrationChecks.Run();
-        await AccountManagementChecks.Run();
-    }
-}
-
-static class MigrationChecks
-{
-    internal static void Check(bool condition, string text)
-    {
-        if (!condition) throw new Exception(text);
-        Console.WriteLine("PASS " + text);
-    }
-    internal static IEnumerable<Control> Controls(Control control)
-    {
-        yield return control;
-        if (control is Ribbon ribbon)
-            foreach (var tab in ribbon.Tabs)
-                foreach (var child in Controls(tab)) yield return child;
-        if (control is RibbonTab ribbonTab)
-            foreach (var group in ribbonTab.Groups)
-                foreach (var child in Controls(group)) yield return child;
-        if (control is RibbonGroup ribbonGroup)
-            foreach (var item in ribbonGroup.Items.OfType<Control>())
-                foreach (var child in Controls(item)) yield return child;
-        if (control is Panel panel)
-            foreach (var item in panel.Children)
-                foreach (var child in Controls(item)) yield return child;
-        if (control is Border { Child: Control inner })
-            foreach (var child in Controls(inner)) yield return child;
-        if (control is ContentControl { Content: Control content })
-            foreach (var child in Controls(content)) yield return child;
-        if (control is ItemsControl items)
-            foreach (var item in items.Items.OfType<Control>())
-                foreach (var child in Controls(item)) yield return child;
-    }
-    internal static T Named<T>(Control control, string name) where T : Control => Controls(control).OfType<T>().First(c => c.Name == name);
-    internal static void Click(Control control, string content) => Controls(control).OfType<Button>().First(b => b.Content?.ToString() == content && b.IsVisible).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-    internal static async Task Until(Func<bool> condition)
-    {
-        for (int i = 0; i < 100 && !condition(); i++) await Task.Delay(10);
-        Check(condition(), "asynchronous UI operation completes");
-    }
-
-    internal static async Task Run()
+    [Fact]
+    public async Task Settings_window_pages_and_logs() => await Ui.Run(async () =>
     {
         Check(!JsonSerializer.IsReflectionEnabledByDefault, "Settings JSON reflection is disabled");
         string root = Path.Combine(Path.GetTempPath(), "tohotopia-avalonia-check-" + Guid.NewGuid().ToString("N"));
@@ -111,7 +50,7 @@ static class MigrationChecks
                 && ribbon.SelectedIndex == 0 && ribbon.Tabs.SelectMany(tab => tab.Groups).All(group => !group.CanCollapse), "all four pages and their commands use the fixed Ribbon");
             ribbon.IsMinimized = true;
             Check(!ribbon.IsMinimized, "the Ribbon cannot be minimized by a command or keyboard shortcut");
-            var pages = Controls(window).OfType<StackPanel>().Where(panel => panel.MaxWidth == Ui.PageWidth).ToList();
+            var pages = Controls(window).OfType<StackPanel>().Where(panel => panel.MaxWidth == Settings.Ui.PageWidth).ToList();
             Check(pages.Count == 4 && pages.All(panel => panel.HorizontalAlignment == HorizontalAlignment.Center), "all page bodies have an explicit centered maximum-width layout");
             Check(Controls(window).OfType<Checkbox>().All(c => c.Name != "CloseToTray"), "the standalone panel offers no tray-residency option");
             var seatCount = Named<NumberField>(window, "SeatCount");
@@ -121,11 +60,11 @@ static class MigrationChecks
             Check(seatCount.DesiredSize.Height > 0 && Math.Abs(seatCount.DesiredSize.Height - callbackInput.DesiredSize.Height) <= 1, "the number field matches the input height");
             var idle = new SettingsWindow(new HttpClient(new HostFixture()) { BaseAddress = new Uri("http://fixture") }, initializeOnOpen: false);
             idle.Show();
-            Check(Controls(idle).OfType<Button>().Count(b => b.Content?.ToString() == "登录订阅账号" && b.IsVisible) == 1, "subscription login is hidden until a provider with both API key and subscription is selected");
+            Check(Controls(idle).OfType<TKCode.Arc.Button>().Count(b => b.Content?.ToString() == "登录订阅账号" && b.IsVisible) == 1, "subscription login is hidden until a provider with both API key and subscription is selected");
             idle.StopServices();
             idle.Close();
-            Check(Controls(window).OfType<Button>().Count(b => b.Content?.ToString() == "登录订阅账号" && b.IsVisible) == 1
-                && Controls(window).OfType<Button>().Any(b => b.Content?.ToString() == "填写信息" && b.IsVisible), "a provider with both methods shows the API key button and the subscription login");
+            Check(Controls(window).OfType<TKCode.Arc.Button>().Count(b => b.Content?.ToString() == "登录订阅账号" && b.IsVisible) == 1
+                && Controls(window).OfType<TKCode.Arc.Button>().Any(b => b.Content?.ToString() == "填写信息" && b.IsVisible), "a provider with both methods shows the API key button and the subscription login");
             Check(Named<NumberField>(window, "Timeout").Value == 123 && Named<TextBox>(window, "ExtraRules").Text == "原有规则", "existing global configuration is restored");
             Check(((CatalogProvider)Named<Select>(window, "AuthProvider").SelectedItem!).Id == "xai", "persisted account selection restores provider aliases");
             Check(((CatalogModel)Named<Select>(window, "Seat1Model").SelectedItem!).Id == "xai-model"
@@ -196,7 +135,7 @@ static class MigrationChecks
             Click(window, "立即刷新");
             Check(logs.ItemsSource!.Cast<AgentEvent>().Single(e => e.Stage == "reasoning_delta").Message == "思考一思考二", "completed reasoning fragments merge without losing correlation");
             var failed = logs.ItemsSource!.Cast<AgentEvent>().Single(e => e.Stage == "model_failed");
-            var detail = (Button)logs.Columns.Single(column => column.Header == "详情").CellTemplate!.Build(failed)!;
+            var detail = (TKCode.Arc.Button)logs.Columns.Single(column => column.Header == "详情").CellTemplate!.Build(failed)!;
             Check(detail.Content?.ToString() == "查看详情", "each Agent row exposes an explicit full-details button");
             Click(detail, "查看详情");
             await Until(() => window.OwnedWindows.Any(item => item.Title?.StartsWith("日志详情") == true));
@@ -207,7 +146,7 @@ static class MigrationChecks
             Click(detailDialog, "关闭");
             await Until(() => !window.OwnedWindows.Any(item => item.Title?.StartsWith("日志详情") == true));
             var decision = logs.ItemsSource!.Cast<AgentEvent>().Single(e => e.Stage == "model_decision");
-            detail = (Button)logs.Columns.Single(column => column.Header == "详情").CellTemplate!.Build(decision)!;
+            detail = (TKCode.Arc.Button)logs.Columns.Single(column => column.Header == "详情").CellTemplate!.Build(decision)!;
             Click(detail, "查看详情");
             await Until(() => window.OwnedWindows.Any(item => item.Title?.StartsWith("日志详情") == true));
             detailDialog = window.OwnedWindows.Single(item => item.Title?.StartsWith("日志详情") == true);
@@ -216,7 +155,7 @@ static class MigrationChecks
                 "the details dialog includes complete reasoning and model output related to the same request");
             Click(detailDialog, "关闭");
             await Until(() => !window.OwnedWindows.Any(item => item.Title?.StartsWith("日志详情") == true));
-            Check(!Controls(window).OfType<TabItem>().Any(tab => tab.Header?.ToString() == "游戏运行日志"), "the obsolete BepInEx game-log tab is removed");
+            Check(!Controls(window).OfType<TKCode.Arc.TabItem>().Any(tab => tab.Header?.ToString() == "游戏运行日志"), "the obsolete BepInEx game-log tab is removed");
             Check(Named<Alert>(window, "LogStatus").IsOpen && Named<Alert>(window, "LogStatus").Content?.ToString()?.Contains("只有‘游戏执行’") == true, "log diagnostics use a wrapping Alert");
             Named<Checkbox>(window, "ErrorsOnly").IsChecked = true;
             var retained = logs.ItemsSource!.Cast<AgentEvent>().ToList();
@@ -233,20 +172,16 @@ static class MigrationChecks
             restored.Exit();
             Check(restored.IsClosed, "explicit exit really closes a restored window");
         }
-        catch (Exception error)
-        {
-            Console.WriteLine(error);
-            throw;
-        }
         finally
         {
             window.StopServices();
             window.Close();
             Environment.SetEnvironmentVariable("TOHOTOPIA_LLM_DATA", oldRoot);
+            Files.Root = "";
             Directory.Delete(root, true);
             Directory.Delete(legacyRoot, true);
         }
-    }
+    });
 
     sealed class HostFixture : HttpMessageHandler
     {

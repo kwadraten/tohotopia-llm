@@ -6,11 +6,12 @@ using Settings;
 using TKCode.Arc;
 using Tohotopia;
 using TohotopiaShared;
-using static MigrationChecks;
+using Xunit;
+using static Ui;
 
-static class AccountManagementChecks
+public class AccountManagementTests
 {
-    internal static async Task Run()
+    [Fact] public async Task Account_management_flows() => await Ui.Run(async () =>
     {
         string root = Path.Combine(Path.GetTempPath(), "tohotopia-account-check-" + Guid.NewGuid().ToString("N"));
         string? oldRoot = Environment.GetEnvironmentVariable("TOHOTOPIA_LLM_DATA");
@@ -242,9 +243,10 @@ static class AccountManagementChecks
             window.StopServices();
             window.Close();
             Environment.SetEnvironmentVariable("TOHOTOPIA_LLM_DATA", oldRoot);
+            Files.Root = "";
             if (Directory.Exists(root)) Directory.Delete(root, true);
         }
-    }
+    });
 
     static async Task<ApiKeyDialog> OpenEditor(SettingsWindow window)
     {
