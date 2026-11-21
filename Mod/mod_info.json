@@ -1,6 +1,6 @@
 {
   "id": "local.tohotopia.llm.battle",
-  "title": "LLM Battle",
+  "title": "LLM AI in Tohotopia",
   "description": "大语言模型接管 Steam 房间 AI 席位。需要游戏 0.8.5b 或更新版本与 TH1 Mod Loader 0.8.031+。订阅后在桌面启动「TOHOTOPIA大模型AI控制面板」配置账号与席位。",
   "version": "0.2.0",
   "author": "kwadraten",

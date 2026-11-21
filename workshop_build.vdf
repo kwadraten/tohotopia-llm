@@ -5,40 +5,8 @@
 	"contentfolder"		"D:\code\tohotopia-llm\dist\LLMBattle"
 	"previewfile"		"D:\code\tohotopia-llm\dist\LLMBattle\preview.png"
 	"visibility"		"0"
-	"title"		"LLM Battle"
-	"description"		"大语言模型接管《帝国幻想乡》Steam 联机房间的 AI 席位——每个席位可选自己的模型和提供商，房主可随时恢复原生 AI。
-
-【前置条件】
-· 《帝国幻想乡》0.8.5b 或更新版本
-· TH1 Mod Loader 0.8.031 或更新（已在本页「必需的物品」中勾选，订阅本 mod 会一并订阅）：
-  https://steamcommunity.com/sharedfiles/filedetails/?id=3829555573
-· Windows；游戏内置「创意工坊 / Mod」菜单只加载 JSON 数据补丁，无法加载本 mod
-· 模型调用需要你自己的提供商账号或 API Key
-
-【使用方法】
-1. 订阅本 mod，在 TH1ModManager 中启用 LLM Battle
-2. 手动启动「TOHOTOPIA大模型AI控制面板」：面板首次运行会自动在桌面创建快捷方式；
-   找不到快捷方式时，在工坊内容目录中运行 Settings\TH1LLMBattlePanel.exe，例如
-   steamapps\workshop\content\3774440\3843427412\Settings\TH1LLMBattlePanel.exe
-   （「管理→浏览本地文件」可直达工坊目录；也可在开始菜单搜索 TH1LLMBattlePanel）
-3. 在面板「账号管理」中添加模型订阅或 API Key，在「AI 接管」中为每个席位选择模型并保存接管配置
-4. 由房主创建普通 Steam 联机房间，设置足够数量的原生 AI 席位并开始对局；
-   在面板中「启用模型接管」即可，每次最多接管 4 个 AI 席位；游戏内按 F8 也能打开面板
-5. 面板关闭即退出，不影响已启用的接管；本地 AgentHost 服务随游戏自动启动
-
-【开源仓库】
-https://github.com/kwadraten/tohotopia-llm
-
-【卸载与还原】
-· 在 TH1ModManager 中停用 LLM Battle 并取消订阅，游戏即恢复原状，无需其他操作
-· 账号、设置、日志保存在 %USERPROFILE%\AppData\LocalLow\TohotopiaLLM\runtime，
-  工坊更新不会覆盖；如需彻底清除请手动删除该目录
-· 从旧版 BepInEx 安装升级：关闭游戏后运行 mod 目录内的 Remove-BepInEx.bat，
-  它会保留账号与设置并移除游戏目录中的 BepInEx/Doorstop 文件
-
-────────────────────────────────────
-
-Let large language models control built-in AI seats in TOHOTOPIA Steam multiplayer lobbies — each seat can use its own model and provider, and the host can restore the native AI at any time.
+	"title"		"LLM AI in Tohotopia"
+	"description"		"Let large language models control built-in AI seats in TOHOTOPIA Steam multiplayer lobbies. each seat can use its own model and provider, and the host can restore the native AI at any time.
 
 Requirements: game 0.8.5b or newer and TH1 Mod Loader 0.8.031+ (linked as a required Workshop item). Windows only; the game's built-in Workshop menu cannot load code mods. You need your own provider account or API key for model requests.
 
@@ -46,6 +14,8 @@ Usage: subscribe and enable LLM Battle in TH1ModManager, then launch the "TOHOTO
 
 Source code: https://github.com/kwadraten/tohotopia-llm
 
-Uninstall: disable LLM Battle in TH1ModManager and unsubscribe — the game returns to normal with nothing else to remove. Accounts, settings and logs live in %USERPROFILE%\AppData\LocalLow\TohotopiaLLM\runtime and are never overwritten by Workshop updates; delete that folder manually if you want them gone. Upgrading from the legacy BepInEx build: close the game and run Remove-BepInEx.bat inside the mod folder to migrate your data and clean out BepInEx."
+Uninstall: disable LLM Battle in TH1ModManager and unsubscribe — the game returns to normal with nothing else to remove. Accounts, settings and logs live in %USERPROFILE%\AppData\LocalLow\TohotopiaLLM\runtime and are never overwritten by Workshop updates; delete that folder manually if you want them gone.
+
+Upgrading from the legacy BepInEx build: close the game and run Remove-BepInEx.bat inside the mod folder to migrate your data and clean out BepInEx."
 	"changenote"		"v0.2.0 initial release"
 }

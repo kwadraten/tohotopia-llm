@@ -1,4 +1,4 @@
-Let large language models control built-in AI seats in TOHOTOPIA Steam multiplayer lobbies — each seat can use its own model and provider, and the host can restore the native AI at any time.
+Let large language models control built-in AI seats in TOHOTOPIA Steam multiplayer lobbies. each seat can use its own model and provider, and the host can restore the native AI at any time.
 
 Requirements: game 0.8.5b or newer and TH1 Mod Loader 0.8.031+ (linked as a required Workshop item). Windows only; the game's built-in Workshop menu cannot load code mods. You need your own provider account or API key for model requests.
 
@@ -6,4 +6,6 @@ Usage: subscribe and enable LLM Battle in TH1ModManager, then launch the "TOHOTO
 
 Source code: https://github.com/kwadraten/tohotopia-llm
 
-Uninstall: disable LLM Battle in TH1ModManager and unsubscribe — the game returns to normal with nothing else to remove. Accounts, settings and logs live in %USERPROFILE%\AppData\LocalLow\TohotopiaLLM\runtime and are never overwritten by Workshop updates; delete that folder manually if you want them gone. Upgrading from the legacy BepInEx build: close the game and run Remove-BepInEx.bat inside the mod folder to migrate your data and clean out BepInEx.
+Uninstall: disable LLM Battle in TH1ModManager and unsubscribe — the game returns to normal with nothing else to remove. Accounts, settings and logs live in %USERPROFILE%\AppData\LocalLow\TohotopiaLLM\runtime and are never overwritten by Workshop updates; delete that folder manually if you want them gone.
+
+Upgrading from the legacy BepInEx build: close the game and run Remove-BepInEx.bat inside the mod folder to migrate your data and clean out BepInEx.
