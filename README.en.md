@@ -32,16 +32,20 @@ Install the .NET 10 SDK, Visual Studio Desktop development with C++ build tools,
 
 ```powershell
 .\Build.ps1
-dotnet run --project .\Checks\Checks.csproj -c Release
-dotnet run --project .\SettingsChecks -c Release
+dotnet test .\Checks\Checks.csproj
+dotnet test .\SettingsChecks
+dotnet test .\LoaderChecks
 ```
 
-`Build.ps1` creates a complete `dist\LLMBattle` content folder including the loader files, `package.build`, defaults, and NativeAOT Windows x64 host and settings executables. Run the migration checks with:
+`Build.ps1` creates a complete `dist\LLMBattle` content folder including the loader files, `package.build`, defaults, and NativeAOT Windows x64 host and settings executables. The environment-dependent LoaderChecks audits are enabled through environment variables:
 
 ```powershell
-dotnet run --project .\LoaderChecks -c Release -- "loader-directory\0.8.5d\TH1.Hotfix.dll"
-.\LoaderChecks\RemoveBepInExChecks.ps1
+$env:TOHOTOPIA_LOADER_DLL = "loader-directory\0.8.5d\TH1.Hotfix.dll"
+$env:TOHOTOPIA_PACKAGE_DIR = "dist\LLMBattle"
+dotnet test .\LoaderChecks
 ```
+
+Likewise, the end-to-end SettingsChecks lifecycle tests run when `TOHOTOPIA_PANEL_EXE` points at a built `TH1LLMBattlePanel.exe`; `Checks` honors `TOHOTOPIA_NATIVE_HOST` (AOT host HTTP contracts) and `TOHOTOPIA_RULES_SNAPSHOT` (real rule snapshot audit). These tests skip automatically when unset.
 
 Upload `dist\LLMBattle` directly to the Workshop, excluding personal runtime data. Set loader item `3829555573` as a required Workshop item when publishing. Keep `package.build` with its matching entry DLL. The loader owns enablement and load order; Steam handles program updates.
 

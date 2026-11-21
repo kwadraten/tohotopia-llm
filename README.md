@@ -32,16 +32,20 @@ Agent 使用 Microsoft Agent Framework。每次决策会结合可见状态、相
 
 ```powershell
 .\Build.ps1
-dotnet run --project .\Checks\Checks.csproj -c Release
-dotnet run --project .\SettingsChecks -c Release
+dotnet test .\Checks\Checks.csproj
+dotnet test .\SettingsChecks
+dotnet test .\LoaderChecks
 ```
 
-`Build.ps1` 生成完整的 `dist\LLMBattle` 发布目录，包含入口、`package.build`、默认配置，以及 NativeAOT 编译的 Windows x64 AgentHost 和设置窗口。可单独运行迁移检查：
+`Build.ps1` 生成完整的 `dist\LLMBattle` 发布目录，包含入口、`package.build`、默认配置，以及 NativeAOT 编译的 Windows x64 AgentHost 和设置窗口。LoaderChecks 的环境相关审计通过环境变量按需启用：
 
 ```powershell
-dotnet run --project .\LoaderChecks -c Release -- "加载器目录\0.8.5d\TH1.Hotfix.dll"
-.\LoaderChecks\RemoveBepInExChecks.ps1
+$env:TOHOTOPIA_LOADER_DLL = "加载器目录\0.8.5d\TH1.Hotfix.dll"
+$env:TOHOTOPIA_PACKAGE_DIR = "dist\LLMBattle"
+dotnet test .\LoaderChecks
 ```
+
+类似地，`SettingsChecks` 的端到端生命周期测试通过 `TOHOTOPIA_PANEL_EXE` 指向编译好的 `TH1LLMBattlePanel.exe`；`Checks` 的 `TOHOTOPIA_NATIVE_HOST`、`TOHOTOPIA_RULES_SNAPSHOT` 分别启用 AOT 宿主 HTTP 契约检查和真实规则快照审计。未设置时这些测试自动跳过。
 
 将 `dist\LLMBattle` 原样作为工坊上传的 contentfolder，不要混入本机 runtime 数据。仓库根目录的 `workshop_build.vdf` 已指向该目录与 `preview.png`，可用 steamcmd 执行 `steamcmd +login <用户> +workshop_build_item workshop_build.vdf +quit` 创建/更新条目；条目页中的说明文本粘贴自 `workshop-description-zh.txt` 与 `workshop-description-en.txt`（中文在前，英文追加在后）。发布条目时，将加载器 `3829555573` 设置为 Steam 工坊必需物品。`package.build` 与入口程序集一起生成，用于定位当前加载版本的文件；不要手工替换单独的 DLL。启用顺序由加载器管理，程序更新由 Steam 负责。
 
