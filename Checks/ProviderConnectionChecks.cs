@@ -59,7 +59,7 @@ static class ProviderConnectionChecks
                 oauth.ConfigureApiKey(id, new(key, url));
                 var restored = new OAuth();
                 Require(restored.Accounts().Any(a => a.Provider == id && a.Configured && a.AuthType == "api_key" && a.Connected), id + " restores saved credentials in provider management");
-                Require(!System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(Path.Combine(Files.Root, id + ".token"))).Contains(key), id + " stores no plaintext key");
+                Require(!System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(CredentialPaths.File(Files.Root, id + ".token"))).Contains(key), id + " stores no plaintext key");
                 using var handler = new ProviderTransport(expectedUrl, key, nativeGoogle);
                 using var client = new SubscriptionClient(new() { Provider = id, Model = model }, restored, new HttpClient(handler));
                 var reply = await client.GetResponseAsync([new(ChatRole.User, "fixture-state")], new ChatOptions

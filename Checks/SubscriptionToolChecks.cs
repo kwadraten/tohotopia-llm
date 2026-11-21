@@ -38,7 +38,7 @@ internal static class SubscriptionToolChecks
 
             foreach (string provider in providers)
             {
-                string tokenPath = Path.Combine(Files.Root, provider + ".token");
+                string tokenPath = CredentialPaths.File(Files.Root, provider + ".token");
                 prior[tokenPath] = File.Exists(tokenPath) ? File.ReadAllBytes(tokenPath) : null;
                 var token = new Token("fixture-access", "fixture-refresh", DateTimeOffset.UtcNow.AddHours(1), "fixture-account", "fixture-client", "chatgpt.tokens.use.direct");
                 File.WriteAllBytes(tokenPath, ProtectedData.Protect(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(token)), null, DataProtectionScope.CurrentUser));

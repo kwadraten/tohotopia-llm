@@ -1,7 +1,12 @@
 Microsoft Agent Framework: https://github.com/microsoft/agent-framework (MIT).
 Grok OAuth protocol verified against https://github.com/anomalyco/opencode/blob/dev/packages/core/src/plugin/provider/xai.ts and https://github.com/xai-org/grok-build (MIT / Apache-2.0; see upstream licenses).
 Kimi OAuth protocol verified against https://github.com/MoonshotAI/kimi-cli/blob/main/src/kimi_cli/auth/oauth.py (Apache-2.0). No Python execution is used by this project.
-IL2CppSharp: https://github.com/SNWCreations/IL2CppSharp. Included library license in Mod/lib.
-BepInEx uses the locally installed HybridCLR-compatible Il2CppInterop.Runtime build. See https://github.com/SNWCreations/Il2CppInterop (LGPL-3.0).
-FSharp.ModelsDev 0.1.0: https://github.com/kwadraten/FSharp.ModelsDev (MIT). Used for the OpenAI Responses chat client and embedded Models.dev catalog; OAuth and encrypted token storage remain host-provided.
+FSharp.ModelsDev 0.1.2: https://github.com/kwadraten/FSharp.ModelsDev (MIT). Used for the OpenAI Responses chat client and embedded Models.dev catalog; OAuth and encrypted token storage remain host-provided.
 Anthropic browser PKCE reference: https://github.com/ex-machina-co/opencode-anthropic-auth/blob/main/src/auth.ts. Only authorization protocol is referenced; no client impersonation, billing fingerprint, or attestation is used.
+
+Newtonsoft.Json 13.0.3: https://github.com/JamesNK/Newtonsoft.Json (MIT). The mod uses the copy already loaded by the game; it is not redistributed.
+
+Avalonia UI 12.1.6: https://github.com/AvaloniaUI/Avalonia (MIT). Used by the settings application.
+TKCode.Arc 1.3.0 (with TKCode.Arc.Core and TKCode.Arc.Foundation): https://github.com/AIDotNet/TKCode.Arc (MIT; includes Arc components from uiarc.dev, MIT). Theme and controls of the settings application. Its bundled Lucide icons (https://lucide.dev, ISC) are compiled in; the optional Geist/Inter font packages are not used, and text is rendered with the system Microsoft YaHei UI font.
+SkiaSharp and HarfBuzzSharp: https://github.com/mono/SkiaSharp (MIT). Native rendering and text shaping for the settings application; upstream native components retain their respective notices.
+Thoth.Json 0.5.0: https://github.com/thoth-org/Thoth.Json (MIT). Explicit JSON codecs used by FSharp.ModelsDev.

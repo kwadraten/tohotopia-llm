@@ -2,12 +2,23 @@ using System.Text.Json;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using Tohotopia;
+if (args.Contains("--startup-profile")) { await StartupProfile.Run(); return; }
+if (args.Contains("--catalog-startup")) { await CatalogStartupChecks.Run(); return; }
+if (args.Contains("--source-json"))
+{
+    AppContext.SetSwitch("System.Text.Json.JsonSerializer.IsReflectionEnabledByDefault", false);
+    await SourceJsonChecks.Run(args.SkipWhile(a => a != "--source-json").Skip(1).FirstOrDefault());
+    return;
+}
 if (args.Length == 2 && args[0] == "--rules-snapshot") { RulesSnapshotChecks.Run(args[1]); return; }
 if (args.Contains("--native-seats")) { NativeAiSeatChecks.Run(); return; }
 if (args.Contains("--action-plan")) { await ActionPlanChecks.Run(); return; }
 if (args.Contains("--communication")) { await CommunicationChecks.Run(); return; }
 if (args.Contains("--provider-connections")) { await ProviderConnectionChecks.Run(); return; }
+if (args.Contains("--credentials")) { await CredentialChecks.Run(); return; }
+await CatalogStartupChecks.Run();
 await ProviderConnectionChecks.Run();
+await CredentialChecks.Run();
 Files.Root = Path.Combine(Path.GetTempPath(), "tohotopia-check-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(Files.Root);
 RoomFileChecks.Run(Files.Root);
@@ -80,7 +91,7 @@ try { await SubscriptionClient.ReadResponses(new MemoryStream(System.Text.Encodi
 var transport = new FixtureTransport();
 var oauthFixture = new OAuth(new HttpClient(transport));
 var fixtureToken = new Token("fixture-old", "fixture-refresh", DateTimeOffset.UtcNow.AddHours(1), "fixture-account", "fixture-client", "chatgpt.tokens.use.direct");
-File.WriteAllBytes(Path.Combine(Files.Root, "openai.token"), System.Security.Cryptography.ProtectedData.Protect(System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(fixtureToken)), null, System.Security.Cryptography.DataProtectionScope.CurrentUser));
+File.WriteAllBytes(CredentialPaths.File(Files.Root, "openai.token"), System.Security.Cryptography.ProtectedData.Protect(System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(fixtureToken)), null, System.Security.Cryptography.DataProtectionScope.CurrentUser));
 using (var direct = new SubscriptionClient(new AgentConfig(), oauthFixture, new HttpClient(transport))) { var response = await direct.GetResponseAsync(new[] { new ChatMessage(ChatRole.User, "fixture-state") }, new ChatOptions { Instructions = "fixture-rules" }); Check(response.Text == "fixture-choice" && transport.ModelCalls == 2 && transport.RefreshCalls == 1, "direct HTTP retries 401 once after OAuth refresh"); Check(transport.LastBody.Contains("fixture-rules") && transport.LastBody.Contains("fixture-state"), "Agent Framework instructions reach direct HTTP transport"); }
 var auth = new OAuth();
 var manual = await auth.Start("anthropic", CancellationToken.None);
@@ -95,6 +106,17 @@ var seatDirector = new Director(new OAuth(), (c, _) => { selectedConfig = c; ret
 await seatDirector.Decide(r with { RequestId = "seat-test", AiSlot = 2 }, CancellationToken.None);
 Check(selectedConfig?.Provider == "grok" && selectedConfig.Model == "model-b" && selectedConfig.Reasoning == "high", "each AI seat selects its own provider/model/reasoning");
 Check(new TohotopiaShared.AISeat { Model = "model-b" }.Name == "model-b", "AI player name follows model name");
+AgentConfig? pingConfig = null;
+var pingClient = new FakeClient { Response = "Pong!" };
+var pingDirector = new Director(new OAuth(), (c, _) => { pingConfig = c; return pingClient; });
+var ping = await pingDirector.Ping("xai", new ModelCatalog(new OAuth()), CancellationToken.None);
+Check(ping.Success && ping.Reply == "Pong!" && ping.Model == "model-b" && pingConfig?.Provider == "grok" && pingConfig.Reasoning == "high",
+    "connectivity ping reuses the seat provider/model/reasoning and reports the reply");
+pingClient.Response = "";
+pingClient.Fail = true;
+var failedPing = await pingDirector.Ping("xai", new ModelCatalog(new OAuth()), CancellationToken.None);
+Check(!failedPing.Success && failedPing.Error.Contains("fixture ping failed") && failedPing.Provider == "grok",
+    "connectivity ping reports model errors such as HTTP 429 to the caller");
 using (var catalog = JsonDocument.Parse("""{"models":{"fixture-reasoner":{"name":"Fixture Reasoner","reasoning":true,"reasoning_options":[{"type":"effort","values":["low","ultra"]}],"modalities":{"output":["text"]}},"fixture-image":{"modalities":{"output":["image","text"]}},"fixture-plain":{"reasoning":false,"modalities":{"output":["text"]}}}}"""))
 {
     var parsed = ModelCatalog.ParseModels(catalog.RootElement);
@@ -108,12 +130,12 @@ var restoredAuth = new OAuth(new HttpClient(transport));
 var restoredToken = await restoredAuth.Credentials("openai", CancellationToken.None);
 Check(restoredToken.Access == "fixture-new" && restoredToken.Refresh == "fixture-rotated" && restoredToken.ClientId == "fixture-client" && restoredToken.Scope.Contains("chatgpt.tokens.use.direct"), "new OAuth instance restores encrypted token, rotated refresh and client registration");
 Check(restoredAuth.Status("openai").Connected && restoredAuth.Status("openai").RefreshAvailable, "account management restores persisted subscription status");
-Check(!System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(Path.Combine(Files.Root, "openai.token"))).Contains("fixture-new"), "persistent credential file does not contain plaintext token");
-var tokenBytesBefore = File.ReadAllBytes(Path.Combine(Files.Root, "openai.token"));
+Check(!System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(CredentialPaths.File(Files.Root, "openai.token"))).Contains("fixture-new"), "persistent credential file does not contain plaintext token");
+var tokenBytesBefore = File.ReadAllBytes(CredentialPaths.File(Files.Root, "openai.token"));
 transport.FailRefresh = true;
 try { await restoredAuth.Credentials("openai", CancellationToken.None, true); throw new Exception("Refresh failure accepted"); } catch (InvalidOperationException) { Console.WriteLine("PASS refresh failure is reported"); }
 transport.FailRefresh = false;
-Check(File.ReadAllBytes(Path.Combine(Files.Root, "openai.token")).SequenceEqual(tokenBytesBefore) && new OAuth().Status("openai").Status == "refresh_failed", "refresh failure preserves credentials and diagnostic state across restart");
+Check(File.ReadAllBytes(CredentialPaths.File(Files.Root, "openai.token")).SequenceEqual(tokenBytesBefore) && new OAuth().Status("openai").Status == "refresh_failed", "refresh failure preserves credentials and diagnostic state across restart");
 await restoredAuth.Credentials("openai", CancellationToken.None, true);
 Check(new OAuth().Status("openai").Status == "connected", "successful retry clears persisted refresh failure");
 File.WriteAllText(Path.Combine(Files.Root, "models-dev.json"), "{}");
@@ -178,11 +200,12 @@ sealed class CatalogTransport : HttpMessageHandler
 sealed class FakeClient : IChatClient
 {
     public Queue<string> Responses = new();
-    public int Calls; public string LastPrompt = "", Response = """{"requestId":"test-1","candidateId":"a0","reason":"expand"}""";
+    public int Calls; public string LastPrompt = "", Response = """{"requestId":"test-1","candidateId":"a0","reason":"expand"}"""; public bool Fail;
     public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> m, ChatOptions? o = null, CancellationToken ct = default)
     {
         Calls++;
         LastPrompt = (o?.Instructions ?? "") + string.Join("\n", m.Select(x => x.Text));
+        if (Fail) throw new InvalidOperationException("fixture ping failed: HTTP 429");
         return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, Responses.Count > 0 ? Responses.Dequeue() : Response)));
     }
     public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> m, ChatOptions? o = null, [EnumeratorCancellation] CancellationToken ct = default)

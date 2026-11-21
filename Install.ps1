@@ -1,74 +1,66 @@
 ﻿param(
-    [string]$GameRoot
+    [string]$GameRoot,
+    [string]$ModsRoot
 )
-$ErrorActionPreference='Stop'
-
+$ErrorActionPreference = 'Stop'
 if ([string]::IsNullOrWhiteSpace($GameRoot)) {
     $candidates = @(@(
         foreach ($drive in Get-PSDrive -PSProvider FileSystem) {
             foreach ($steamPath in @('Program Files (x86)\Steam', 'Program Files\Steam', 'Steam', 'SteamLibrary')) {
                 $candidate = Join-Path $drive.Root (Join-Path $steamPath 'steamapps\common\帝国幻想乡')
-                if (Test-Path -LiteralPath (Join-Path $candidate 'TOHOTOPIA.exe') -PathType Leaf) {
-                    $candidate
-                }
+                if (Test-Path -LiteralPath (Join-Path $candidate 'TOHOTOPIA.exe') -PathType Leaf) { $candidate }
             }
         }
     ) | Select-Object -Unique)
-    if (@($candidates).Count -eq 0) {
-        throw 'Could not find TOHOTOPIA in the default Steam folders. Specify the game directory with -GameRoot "path\to\帝国幻想乡".'
-    }
-    if (@($candidates).Count -gt 1) {
-        throw ("Multiple TOHOTOPIA installations found. Specify one with -GameRoot:`n" + ($candidates -join "`n"))
-    }
+    if ($candidates.Count -ne 1) { throw 'Specify the game directory with -GameRoot "path\to\帝国幻想乡".' }
     $GameRoot = $candidates[0]
 }
-
-if (-not (Test-Path -LiteralPath (Join-Path $GameRoot 'TOHOTOPIA.exe') -PathType Leaf)) {
-    throw "Game directory is invalid or TOHOTOPIA.exe is missing: $GameRoot"
-}
+if (-not (Test-Path -LiteralPath (Join-Path $GameRoot 'TOHOTOPIA.exe') -PathType Leaf)) { throw "Invalid game directory: $GameRoot" }
 $GameRoot = (Resolve-Path -LiteralPath $GameRoot).Path
-$runtimeDll=Join-Path $GameRoot 'BepInEx\core\Il2CppInterop.Runtime.dll'
-$runtimeSource=Join-Path $PSScriptRoot 'Mod\lib\Il2CppInterop.Runtime.dll'
-if (-not (Test-Path -LiteralPath $runtimeDll -PathType Leaf)) {
-    throw "BepInEx runtime not found at $runtimeDll. Install BepInEx before running this script."
+if (Get-Process TOHOTOPIA -ErrorAction SilentlyContinue) { throw 'Close the game before installing.' }
+$hotfix = Join-Path $GameRoot 'TOHOTOPIA_Data\StreamingAssets\HybridCLR\HotfixDlls\TH1.Hotfix.dll.bytes'
+if (-not (Test-Path -LiteralPath $hotfix -PathType Leaf) -or
+    -not [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($hotfix)).Contains('SetMethodOverride')) {
+    throw 'Install the current TH1 Mod Loader with TH1ModManager.exe first (Workshop item 3829555573).'
 }
-$requiredFiles = @(
-    $runtimeSource
-    (Join-Path $PSScriptRoot 'Mod\bin\Release\net6.0\Tohotopia.LLMBattle.dll')
-    (Join-Path $PSScriptRoot 'Mod\lib\IL2CppSharp.dll')
-    (Join-Path $PSScriptRoot 'Mod\lib\IL2CppSharp.Hooking.dll')
-    (Join-Path $PSScriptRoot 'settings.example.json')
-)
-foreach ($file in $requiredFiles) {
-    if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Required installation file not found: $file. Build the project first." }
+if ([string]::IsNullOrWhiteSpace($ModsRoot)) {
+    $info = @(Get-Content -LiteralPath (Join-Path $GameRoot 'TOHOTOPIA_Data\app.info'))
+    if ($info.Count -lt 2) { throw 'Cannot determine Unity persistentDataPath. Specify -ModsRoot.' }
+    $company = $info[0].Trim().Replace('.', '_')
+    $product = $info[1].Trim().Replace('.', '_')
+    $ModsRoot = Join-Path ([Environment]::GetFolderPath('UserProfile')) "AppData\LocalLow\$company\$product\Mods"
 }
-foreach ($directory in @('dist\AgentHost', 'dist\Settings')) {
-    if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot $directory) -PathType Container)) {
-        throw "Required build directory not found: $directory. Build the project first."
-    }
+# Developer convenience only. Workshop subscribers do not run this script.
+$source = Join-Path $PSScriptRoot 'dist\LLMBattle'
+foreach ($file in @('mod.dll', 'mod_loader.txt', 'mod_info.json', 'package.build', 'settings.example.json', 'AgentHost\AgentHost.exe', 'Settings\TH1LLMBattlePanel.exe')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $source $file) -PathType Leaf)) { throw "Missing $file. Run Build.ps1 first." }
 }
-Write-Output "Game directory: $GameRoot"
-if(Get-Process TOHOTOPIA -ErrorAction SilentlyContinue){throw 'Close the game before installing.'}
-if((Get-FileHash -LiteralPath $runtimeDll).Hash -ne (Get-FileHash -LiteralPath $runtimeSource).Hash){
-    Copy-Item -LiteralPath $runtimeDll -Destination ($runtimeDll+'.bak') -Force
-    Copy-Item -LiteralPath $runtimeSource -Destination $runtimeDll -Force
-}
-$target=Join-Path $GameRoot 'BepInEx\plugins\LLMBattle'
+$target = [IO.Path]::GetFullPath((Join-Path $ModsRoot 'LLMBattle'))
 New-Item -ItemType Directory -Path $target -Force | Out-Null
-if(Test-Path -LiteralPath (Join-Path $target 'Tohotopia.LLMBattle.dll')){Copy-Item -LiteralPath (Join-Path $target 'Tohotopia.LLMBattle.dll') -Destination (Join-Path $target 'Tohotopia.LLMBattle.dll.bak') -Force}
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Mod\bin\Release\net6.0\Tohotopia.LLMBattle.dll') -Destination $target -Force
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Mod\lib\IL2CppSharp.dll') -Destination $target -Force
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Mod\lib\IL2CppSharp.Hooking.dll') -Destination $target -Force
-Copy-Item -Path (Join-Path $PSScriptRoot 'dist\AgentHost') -Destination $target -Recurse -Force
-Copy-Item -Path (Join-Path $PSScriptRoot 'dist\Settings') -Destination $target -Recurse -Force
-$runtime=Join-Path $target 'runtime'
-New-Item -ItemType Directory -Path $runtime -Force | Out-Null
-if(!(Test-Path -LiteralPath (Join-Path $runtime 'settings.json'))){Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'settings.example.json') -Destination (Join-Path $runtime 'settings.json')}
-$probe=Join-Path $GameRoot 'BepInEx\plugins\AIProbe\TOHOTOPIA.AI.Probe.dll'
-if(Test-Path -LiteralPath $probe){Move-Item -LiteralPath $probe -Destination ($probe+'.disabled') -Force}
-$probeRoot=Split-Path $probe
-foreach($dependency in @('IL2CppSharp.dll','IL2CppSharp.Hooking.dll')){
-    $probeDependency=Join-Path $probeRoot $dependency
-    if(Test-Path -LiteralPath $probeDependency){Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('Mod\lib\'+$dependency)) -Destination $probeDependency -Force}
+if (Test-Path -LiteralPath (Join-Path $target 'mod.dll')) { Copy-Item -LiteralPath (Join-Path $target 'mod.dll') -Destination (Join-Path $target 'mod.dll.bak') -Force }
+Get-ChildItem -LiteralPath $source | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $target -Recurse -Force }
+# Drop the previous panel executable name if still installed.
+Remove-Item -LiteralPath (Join-Path $target 'Settings\Settings.exe') -Force -ErrorAction SilentlyContinue
+$config = Join-Path $ModsRoot 'mods_config.txt'
+if (Test-Path -LiteralPath $config) {
+    $enabled = @(Get-Content -LiteralPath $config | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if ($enabled -cnotcontains 'LLMBattle') { [IO.File]::AppendAllText($config, "`r`nLLMBattle`r`n") }
 }
-Write-Output ('Installed to '+$target)
+$oldDll = Join-Path $GameRoot 'BepInEx\plugins\LLMBattle\Tohotopia.LLMBattle.dll'
+if (Test-Path -LiteralPath $oldDll) { Move-Item -LiteralPath $oldDll -Destination ($oldDll + '.disabled-' + [Guid]::NewGuid().ToString('N')) }
+# Desktop entry point: the panel runs standalone and on demand, so the mod
+# itself stays fully headless.
+$desktop = [Environment]::GetFolderPath('Desktop')
+$linkPath = Join-Path $desktop 'TOHOTOPIA大模型AI控制面板.lnk'
+$shell = New-Object -ComObject WScript.Shell
+$link = $shell.CreateShortcut($linkPath)
+$link.TargetPath = Join-Path $target 'Settings\TH1LLMBattlePanel.exe'
+$link.WorkingDirectory = Join-Path $target 'Settings'
+$link.IconLocation = Join-Path $target 'Settings\TH1LLMBattlePanel.exe,0'
+$link.Description = 'TOHOTOPIA AI 接管设置与账号管理'
+$link.Save()
+# Remove the previous shortcut name if present.
+Remove-Item -LiteralPath (Join-Path $desktop 'TOHOTOPIA AI 设置.lnk') -Force -ErrorAction SilentlyContinue
+Write-Output "Local development mod: $target"
+Write-Output "Desktop shortcut created: $linkPath"
+Write-Output 'The loader will initialize user data and migrate legacy settings on first startup.'

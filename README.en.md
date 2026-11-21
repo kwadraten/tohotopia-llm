@@ -6,51 +6,43 @@ Let language models control the host's AI seats in a TOHOTOPIA Steam multiplayer
 
 ## Installation and use
 
-You need Windows, an installed copy of TOHOTOPIA, BepInEx IL2CPP in the game directory, and both the .NET 10 Desktop Runtime and ASP.NET Core Runtime. Model requests also require an account or API key. The runtimes are available from the [.NET download page](https://dotnet.microsoft.com/download/dotnet/10.0).
+You need Windows, TOHOTOPIA, and [TH1 Mod Loader](https://steamcommunity.com/sharedfiles/filedetails/?id=3829555573) (loader 0.8.031 or newer required; checked against game 0.8.5d). The game's built-in Workshop / Mod menu only loads JSON data patches and cannot load this mod. Both host and settings app use NativeAOT; the settings UI uses Avalonia with the TKCode.Arc theme. No separate .NET installation is required. Model requests require an account or API key.
 
-1. Download the ZIP from [Releases](https://github.com/kwadraten/tohotopia-llm/releases) and extract it. Close the game, open PowerShell in the extracted folder, and run:
-
-   ```powershell
-   .\Install.ps1
-   ```
-
-   The script searches common Steam locations on available drives. If it cannot find the game or finds multiple installations, specify the directory:
-
-   ```powershell
-   .\Install.ps1 -GameRoot "D:\Steam\steamapps\common\帝国幻想乡"
-   ```
-
-   Installation updates the BepInEx runtime and backs up replaced files. Existing plugin settings are preserved.
+1. Install TH1 Mod Loader following its instructions. Subscribe to this mod and enable LLM Battle in the loader manager. The loader discovers its Workshop folder directly; no mod installer or DLL copying is needed.
 2. Start the game. The settings window opens automatically; press `F8` in game to reopen it. Configure provider credentials under account management, choose a model for each seat under AI control, and save the configuration.
 3. As host, create a normal Steam lobby, add enough built-in AI seats, and start the match. Use the settings window to enable model control, restore the built-in AI, and inspect logs. Up to four AI seats can be controlled.
 
+Accounts, settings, and logs live in `%LOCALAPPDATA%\TohotopiaLLM\runtime`, outside subscribed content. Workshop updates, game updates, and Steam library moves preserve this data. First startup migrates runtime data from an older local mod or BepInEx installation automatically.
+
+Players upgrading from the old BepInEx version should close the game and run `Remove-BepInEx.bat` from the subscribed folder. It keeps accounts and settings, then removes BepInEx, Doorstop and its bundled .NET runtime from the game folder. It stops if other BepInEx plugins are installed; add `-Force` to confirm. Use `-WhatIf` to preview and `-BackupRoot` to move files to a backup instead of deleting them.
+
 ## How it works
 
-The BepInEx plugin takes over actions for the host-controlled native AI seats in a multiplayer match and connects to the in-game chat system. It uses the game's fog-of-war and unit visibility calculations to collect each AI's visible map, units, and messages, then sends those observations and the current action candidates to the local AgentHost. The model chooses from those candidates and is not given other players' private state.
+The model catalog loads from local cache, falling back to the embedded FSharp.ModelsDev snapshot when the cache is missing or invalid. Catalogs older than one day refresh in the background. Failed downloads preserve the existing catalog and allow another attempt after five minutes without blocking settings initialization.
+
+The loader starts `ModEntry.Initialize()` and connects the mod to the game loop and chat sender through method overrides. The mod takes over actions for the host-controlled native AI seats in a multiplayer match and connects to the in-game chat system. It uses the game's fog-of-war and unit visibility calculations to collect each AI's visible map, units, and messages, then sends those observations and the current action candidates to the local AgentHost. The model chooses from those candidates and is not given other players' private state.
 
 The agent uses Microsoft Agent Framework. For each decision, it combines visible state, relevant rules, a short strategic memory, and feedback from the previous plan. It asks the model for a plan of up to 12 actions; the model can also query locally exported game rules. The host validates the returned candidate IDs, and the game revalidates each action before execution. After actions are executed, the plugin collects fresh state and candidates. If a later action is no longer valid, it stops the plan and sends the reason and updated state back for replanning. The turn ends when no action is appropriate or the per-turn limit is reached. Models can also communicate through in-game chat and process visible messages outside their own turn.
 
-If a model request or decision fails, the built-in AI is reinitialized and takes over the affected seat's current turn. Other seats continue, and the failed seat retries the model on its next turn. If native AI initialization fails, the affected turn ends. The WinForms window manages accounts, seats, global rules, and logs, and starts the local AgentHost.
+If a model request or decision fails, the built-in AI is reinitialized and takes over the affected seat's current turn. Other seats continue, and the failed seat retries the model on its next turn. If native AI initialization fails, the affected turn ends. The Avalonia window manages accounts, seats, global rules, and logs, and starts the local AgentHost.
 
 ## Development and packaging
 
-Install the .NET 10 SDK and use a game installation with BepInEx. The mod project references assemblies from the game directory, which must be specified for the build:
+Install the .NET 10 SDK, Visual Studio Desktop development with C++ build tools, and the Windows SDK for NativeAOT publishing. The game mod targets `netstandard2.1` and uses the game’s Newtonsoft.Json runtime; building requires no game or BepInEx assemblies:
 
 ```powershell
-.\Build.ps1 -GameRoot "D:\Steam\steamapps\common\帝国幻想乡"
+.\Build.ps1
 dotnet run --project .\Checks\Checks.csproj -c Release
+dotnet run --project .\SettingsChecks -c Release
 ```
 
-`Build.ps1` publishes AgentHost and Settings into `dist` and builds the mod DLL. After building, create a ZIP with the directory structure expected by the installer:
+`Build.ps1` creates a complete `dist\LLMBattle` content folder including the loader files, `package.build`, defaults, and NativeAOT Windows x64 host and settings executables. Run the migration checks with:
 
 ```powershell
-$package = "work\package\tohotopia-llm"
-New-Item -ItemType Directory -Force "$package\Mod\bin\Release\net6.0", "$package\Mod\lib", "$package\dist" | Out-Null
-Copy-Item Install.ps1, settings.example.json, LICENSE, THIRD-PARTY-NOTICES.txt $package
-Copy-Item Mod\bin\Release\net6.0\Tohotopia.LLMBattle.dll "$package\Mod\bin\Release\net6.0"
-Copy-Item Mod\lib\Il2CppInterop.Runtime.dll, Mod\lib\IL2CppSharp.dll, Mod\lib\IL2CppSharp.Hooking.dll, Mod\lib\IL2CppSharp-LICENSE.txt "$package\Mod\lib"
-Copy-Item dist\AgentHost, dist\Settings "$package\dist" -Recurse
-Compress-Archive -Path $package -DestinationPath dist\tohotopia-llm.zip -Force
+dotnet run --project .\LoaderChecks -c Release -- "loader-directory\0.8.5d\TH1.Hotfix.dll"
+.\LoaderChecks\RemoveBepInExChecks.ps1
 ```
 
-Use an empty staging directory for each package so old files are not included. See [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) for third-party components.
+Upload `dist\LLMBattle` directly to the Workshop, excluding personal runtime data. Set loader item `3829555573` as a required Workshop item when publishing. Keep `package.build` with its matching entry DLL. The loader owns enablement and load order; Steam handles program updates.
+
+For local development, `.\Install.ps1 -GameRoot "game-directory"` copies the complete package to local `Mods\LLMBattle`. Subscribers do not run this script. Avoid enabling both a legacy local copy and the Workshop copy.
