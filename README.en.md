@@ -9,8 +9,8 @@ Let language models control the host's AI seats in a TOHOTOPIA Steam multiplayer
 You need Windows, TOHOTOPIA, and [TH1 Mod Loader](https://steamcommunity.com/sharedfiles/filedetails/?id=3829555573) (loader 0.8.031 or newer required; checked against game 0.8.5d). The game's built-in Workshop / Mod menu only loads JSON data patches and cannot load this mod. Both host and settings app use NativeAOT; the settings UI uses Avalonia with the TKCode.Arc theme. No separate .NET installation is required. Model requests require an account or API key.
 
 1. Install TH1 Mod Loader following its instructions. Subscribe to this mod and enable LLM Battle in the loader manager. The loader discovers its Workshop folder directly; no mod installer or DLL copying is needed.
-2. Start the game. The settings window opens automatically; press `F8` in game to reopen it. Configure provider credentials under account management, choose a model for each seat under AI control, and save the configuration.
-3. As host, create a normal Steam lobby, add enough built-in AI seats, and start the match. Use the settings window to enable model control, restore the built-in AI, and inspect logs. Up to four AI seats can be controlled.
+2. Open the "TOHOTOPIA LLM AI Control Panel" from the desktop shortcut (created automatically on first launch; if missing, run `Settings\TH1LLMBattlePanel.exe` inside the subscribed Workshop folder or search for `TH1LLMBattlePanel`). Configure provider credentials under account management, choose a model for each seat under AI control, and save the configuration. `F8` in game also opens the panel.
+3. As host, create a normal Steam lobby, add enough built-in AI seats, and start the match. Use the panel to enable model control, restore the built-in AI, and inspect logs. Up to four AI seats can be controlled. Closing the panel exits it without stopping the in-game takeover.
 
 Accounts, settings, and logs live in `%LOCALAPPDATA%\TohotopiaLLM\runtime`, outside subscribed content. Workshop updates, game updates, and Steam library moves preserve this data. First startup migrates runtime data from an older local mod or BepInEx installation automatically.
 

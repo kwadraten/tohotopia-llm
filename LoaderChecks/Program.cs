@@ -126,7 +126,7 @@ static class Program
     class AiLogic085 { public int AILogicState; public float _targetTime; object _stallWatchdog = new(); }
     static void CheckBuiltPackage(string root)
     {
-        foreach (string file in new[] { "mod.dll", "mod_loader.txt", "mod_info.json", "package.build", "settings.example.json", "README.txt", "Remove-BepInEx.ps1", "Remove-BepInEx.bat", "AgentHost/AgentHost.exe", "Settings/TH1LLMBattlePanel.exe" })
+        foreach (string file in new[] { "mod.dll", "mod_loader.txt", "mod_info.json", "package.build", "preview.png", "settings.example.json", "README.txt", "Remove-BepInEx.ps1", "Remove-BepInEx.bat", "AgentHost/AgentHost.exe", "Settings/TH1LLMBattlePanel.exe" })
             Check(File.Exists(Path.Combine(root, file)), "published package includes " + file);
         foreach (string component in new[] { "AgentHost", "Settings" })
             Check(!Directory.EnumerateFiles(Path.Combine(root, component), "*", SearchOption.AllDirectories)

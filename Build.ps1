@@ -13,7 +13,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Mod build failed' }
 $output = Join-Path $PSScriptRoot 'Mod\bin\Release\netstandard2.1'
 Copy-Item -LiteralPath (Join-Path $output 'Tohotopia.LLMBattle.dll') -Destination (Join-Path $package 'mod.dll')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Mod\README.txt'), (Join-Path $PSScriptRoot 'Remove-BepInEx.ps1'), (Join-Path $PSScriptRoot 'Remove-BepInEx.bat') -Destination $package
-Copy-Item -LiteralPath (Join-Path $output 'package.build'), (Join-Path $PSScriptRoot 'Mod\mod_loader.txt'), (Join-Path $PSScriptRoot 'Mod\mod_info.json'), (Join-Path $PSScriptRoot 'settings.example.json'), (Join-Path $PSScriptRoot 'LICENSE'), (Join-Path $PSScriptRoot 'THIRD-PARTY-NOTICES.txt') -Destination $package
+Copy-Item -LiteralPath (Join-Path $output 'package.build'), (Join-Path $PSScriptRoot 'Mod\mod_loader.txt'), (Join-Path $PSScriptRoot 'Mod\mod_info.json'), (Join-Path $PSScriptRoot 'Mod\preview.png'), (Join-Path $PSScriptRoot 'settings.example.json'), (Join-Path $PSScriptRoot 'LICENSE'), (Join-Path $PSScriptRoot 'THIRD-PARTY-NOTICES.txt') -Destination $package
 $dist = Join-Path $PSScriptRoot 'dist'
 New-Item -ItemType Directory -Path $dist -Force | Out-Null
 $target = [IO.Path]::GetFullPath((Join-Path $dist 'LLMBattle'))

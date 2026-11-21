@@ -9,8 +9,8 @@
 需要 Windows、已安装的《帝国幻想乡》和 [TH1 Mod Loader](https://steamcommunity.com/sharedfiles/filedetails/?id=3829555573)（需要加载器 0.8.031 或更新版本，已核对游戏 0.8.5d）。游戏内置的「创意工坊 / Mod」菜单只加载 JSON 数据补丁，不能加载本 mod。宿主和设置窗口均使用 NativeAOT，设置界面使用 Avalonia 与 TKCode.Arc 主题，无需另装 .NET。模型调用需要账号或 API Key。
 
 1. 按加载器的说明安装 TH1 Mod Loader。订阅本 mod，在加载器管理器中启用 LLM Battle。加载器直接发现工坊目录并加载，无需运行本 mod 安装脚本或复制 DLL。
-2. 启动游戏。设置窗口会自动打开；关闭后可在游戏中按 `F8` 再次打开。在「账号管理」中配置提供商凭据，在「AI 接管」中为每个席位选择模型并保存接管配置。
-3. 由房主创建普通 Steam 房间，添加足够数量的原生 AI 席位并开始对局。设置窗口可启用模型接管、恢复原生 AI，以及查看日志。每次最多接管 4 个 AI 席位。
+2. 双击桌面的「TOHOTOPIA大模型AI控制面板」（面板首次启动会自动创建快捷方式；找不到时在订阅的工坊目录中运行 `Settings\TH1LLMBattlePanel.exe`，或搜索 `TH1LLMBattlePanel`）。在「账号管理」中配置提供商凭据，在「AI 接管」中为每个席位选择模型并保存接管配置。游戏内也可按 `F8` 打开面板。
+3. 由房主创建普通 Steam 房间，添加足够数量的原生 AI 席位并开始对局。面板可启用模型接管、恢复原生 AI，以及查看日志。每次最多接管 4 个 AI 席位。面板关闭即退出，不影响游戏内接管继续运行。
 
 账号、设置和日志保存在 `%LOCALAPPDATA%\TohotopiaLLM\runtime`，与订阅内容分开。工坊更新、游戏更新或 Steam 库目录移动不会覆盖用户数据。首次启动自动迁移旧版本地 mod 或 BepInEx 安装的 runtime 数据。
 
