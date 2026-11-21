@@ -1,16 +1,14 @@
 using System.Net;
 using Tohotopia;
+using Xunit;
 
-static class CatalogStartupChecks
+public class CatalogStartupTests
 {
     const string Cached = """{"xai":{"name":"Cached xAI","models":{"cached":{"name":"Cached model","reasoning":true}}}}""";
     const string Updated = """{"fixture-gateway":{"name":"Updated gateway","npm":"@ai-sdk/openai-compatible","api":"https://fixture.invalid/v1","env":["FIXTURE_API_KEY"],"models":{"updated":{"name":"Updated model"}}}}""";
-    static void Check(bool ok, string text)
-    {
-        if (!ok) throw new Exception(text);
-        Console.WriteLine("PASS " + text);
-    }
-    internal static async Task Run()
+
+    [Fact]
+    public async Task Catalog_lifecycle_and_offline_fallback()
     {
         string prior = Files.Root;
         string root = Path.Combine(Path.GetTempPath(), "tohotopia-catalog-startup-" + Guid.NewGuid().ToString("N"));
@@ -23,7 +21,7 @@ static class CatalogStartupChecks
             using var handler = new ControlledDownload();
             using var http = new HttpClient(handler);
             var fresh = new ModelCatalog(new OAuth(), http);
-            Check((await fresh.Providers(default).WaitAsync(TimeSpan.FromSeconds(2))).Single().Name == "Cached xAI" && handler.Calls == 0,
+            Assert.True((await fresh.Providers(default).WaitAsync(TimeSpan.FromSeconds(2))).Single().Name == "Cached xAI" && handler.Calls == 0,
                 "fresh catalog loads locally without a network request");
 
             File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddDays(-2));
@@ -33,16 +31,16 @@ static class CatalogStartupChecks
             request.Cancel();
             await handler.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
             var readers = await Task.WhenAll(Enumerable.Range(0, 20).Select(_ => stale.Models("grok", default))).WaitAsync(TimeSpan.FromSeconds(2));
-            Check(providers.Single().Name == "Cached xAI" && readers.All(models => models.Single().Id == "cached") && handler.Calls == 1,
+            Assert.True(providers.Single().Name == "Cached xAI" && readers.All(models => models.Single().Id == "cached") && handler.Calls == 1,
                 "stale catalog and concurrent readers return immediately while one download remains blocked");
-            Check(!handler.RequestToken.IsCancellationRequested, "ending an HTTP request does not cancel the shared background refresh");
+            Assert.True(!handler.RequestToken.IsCancellationRequested, "ending an HTTP request does not cancel the shared background refresh");
             handler.Reply.SetResult(new(HttpStatusCode.OK) { Content = new StringContent(Updated) });
             for (int i = 0; i < 200 && !(await stale.Models("fixture-gateway", default)).Any(); i++) await Task.Delay(10);
-            Check((await stale.Models("fixture-gateway", default)).Single().Id == "updated" && File.ReadAllText(path) == Updated,
+            Assert.True((await stale.Models("fixture-gateway", default)).Single().Id == "updated" && File.ReadAllText(path) == Updated,
                 "background refresh atomically persists the catalog and updates subsequent reads");
-            Check((await stale.Providers(default)).Single().ConnectionSupported && ProviderConnections.ApiUrl("fixture-gateway") == "https://fixture.invalid/v1",
+            Assert.True((await stale.Providers(default)).Single().ConnectionSupported && ProviderConnections.ApiUrl("fixture-gateway") == "https://fixture.invalid/v1",
                 "refreshed provider metadata reaches authentication and inference routing");
-            Check(handler.Calls == 1 && !Directory.EnumerateFiles(root, "*.tmp").Any(), "successful refresh leaves no temporary files or repeated downloads");
+            Assert.True(handler.Calls == 1 && !Directory.EnumerateFiles(root, "*.tmp").Any(), "successful refresh leaves no temporary files or repeated downloads");
 
             foreach (string? invalid in new string?[] { null, "{broken", "[]" })
             {
@@ -53,18 +51,19 @@ static class CatalogStartupChecks
                 var offline = new ModelCatalog(new OAuth(), offlineHttp);
                 var fallback = await offline.Providers(default).WaitAsync(TimeSpan.FromSeconds(2));
                 var models = await offline.Models("openai", default).WaitAsync(TimeSpan.FromSeconds(2));
-                Check(fallback.Any(p => p.Id == "openai" && p.ConnectionSupported) && models.Count > 0,
+                Assert.True(fallback.Any(p => p.Id == "openai" && p.ConnectionSupported) && models.Count > 0,
                     $"{(invalid == null ? "missing" : "invalid")} cache uses embedded providers and text models without waiting for the network");
-                Check(models.All(m => !m.Id.Contains("embedding", StringComparison.OrdinalIgnoreCase)), "offline fallback excludes embedding models");
+                Assert.True(models.All(m => !m.Id.Contains("embedding", StringComparison.OrdinalIgnoreCase)), "offline fallback excludes embedding models");
                 await offlineHandler.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
                 offlineHandler.Reply.SetResult(new(HttpStatusCode.ServiceUnavailable));
                 for (int i = 0; i < 5; i++) await offline.Providers(default);
-                Check(offlineHandler.Calls == 1 && (invalid == null ? !File.Exists(path) : File.ReadAllText(path) == invalid),
+                Assert.True(offlineHandler.Calls == 1 && (invalid == null ? !File.Exists(path) : File.ReadAllText(path) == invalid),
                     "offline failure retains local state and backs off instead of downloading on every request");
             }
         }
         finally { Files.Root = prior; Directory.Delete(root, true); }
     }
+
     sealed class ControlledDownload : HttpMessageHandler
     {
         public int Calls;

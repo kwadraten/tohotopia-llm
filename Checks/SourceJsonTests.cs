@@ -7,18 +7,17 @@ using System.Text.Json.Nodes;
 using Microsoft.Extensions.AI;
 using Tohotopia;
 using TohotopiaShared;
+using Xunit;
 
-internal static class SourceJsonChecks
+public class SourceJsonTests
 {
-    static void Check(bool value, string message)
+    [Fact]
+    public async Task Generated_contracts_without_reflection()
     {
-        if (!value) throw new Exception(message);
-        Console.WriteLine("PASS " + message);
-    }
-
-    internal static async Task Run(string? nativeHost)
-    {
-        Check(!JsonSerializer.IsReflectionEnabledByDefault, "JSON checks run with reflection serialization disabled");
+        // TOHOTOPIA_NATIVE_HOST may point at a published AgentHost.exe; without
+        // it the managed assembly is hosted through dotnet exec instead.
+        string? nativeHost = Environment.GetEnvironmentVariable("TOHOTOPIA_NATIVE_HOST");
+        Assert.True(!JsonSerializer.IsReflectionEnabledByDefault, "JSON checks run with reflection serialization disabled");
         string previousRoot = Files.Root;
         string root = Path.Combine(Path.GetTempPath(), "tohotopia-source-json-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -26,20 +25,19 @@ internal static class SourceJsonChecks
         try
         {
             Files.Save(new AgentConfig { ExtraRules = "中文规则", TimeoutSeconds = 45 });
-            Check(Files.Config.ExtraRules == "中文规则" && Files.Config.TimeoutSeconds == 45, "source-generated configuration survives restart");
+            Assert.True(Files.Config.ExtraRules == "中文规则" && Files.Config.TimeoutSeconds == 45, "source-generated configuration survives restart");
             var legacyConfig = JsonSerializer.Deserialize("""{"PROVIDER":"grok","timeoutSeconds":"60"}""", HostJson.Type<AgentConfig>());
-            Check(legacyConfig is { Provider: "grok", TimeoutSeconds: 60 }, "web contract retains case-insensitive names and quoted numeric input");
-            RoomFileChecks.Run(root);
+            Assert.True(legacyConfig is { Provider: "grok", TimeoutSeconds: 60 }, "web contract retains case-insensitive names and quoted numeric input");
             RoomFiles.Write(root, "room.json", new RoomConfig { AIs = [new() { Model = "fixture" }] });
-            Check(RoomFiles.Read<RoomConfig>(root, "room.json")?.AIs[0].Model == "fixture", "shared room contracts use generated metadata");
+            Assert.True(RoomFiles.Read<RoomConfig>(root, "room.json")?.AIs[0].Model == "fixture", "shared room contracts use generated metadata");
             AgentEvents.Write(root, new(DateTimeOffset.UtcNow, "host", "check", "中文\n多行"));
             using (var log = JsonDocument.Parse(File.ReadAllText(Directory.GetFiles(Path.Combine(root, "logs"))[0])))
-                Check(log.RootElement.GetProperty("message").GetString() == "中文\n多行", "JSONL generated contract preserves multiline text");
+                Assert.True(log.RootElement.GetProperty("message").GetString() == "中文\n多行", "JSONL generated contract preserves multiline text");
 
             // Token files historically use PascalCase, while API and room files use camelCase.
             var token = JsonSerializer.Deserialize("""{"Access":"fixture","Refresh":"refresh","Expires":"2030-01-01T00:00:00Z"}""", HostJson.Type<Token>(HostJson.Plain))!;
             using (var saved = JsonDocument.Parse(JsonSerializer.Serialize(token, HostJson.Type<Token>(HostJson.Plain))))
-                Check(token.Access == "fixture" && token.AuthType == "subscription" && saved.RootElement.TryGetProperty("Access", out _), "token contract reads legacy files and preserves PascalCase and optional defaults");
+                Assert.True(token.Access == "fixture" && token.AuthType == "subscription" && saved.RootElement.TryGetProperty("Access", out _), "token contract reads legacy files and preserves PascalCase and optional defaults");
 
             var schemaTool = AIFunctionFactory.Create((string query, int? level = null) => query, "lookup", "fixture", Files.Json);
             var messages = new ChatMessage[]
@@ -53,13 +51,10 @@ internal static class SourceJsonChecks
             };
             var body = SubscriptionClient.OpenAIBody(new AgentConfig { Reasoning = "high" }, messages, [schemaTool]);
             var arguments = JsonNode.Parse(body["input"]![1]!["arguments"]!.GetValue<string>())!;
-            Check(arguments["query"]!.GetValue<string>() == "战争" && arguments["nested"]!["items"]![0]!.GetValue<bool>()
+            Assert.True(arguments["query"]!.GetValue<string>() == "战争" && arguments["nested"]!["items"]![0]!.GetValue<bool>()
                 && body["tools"]![0]!["parameters"]!["type"]!.GetValue<string>() == "object"
                 && body["input"]![2]!["output"]!.GetValue<string>() == "结果", "generated tool contracts preserve schemas, nested arguments and correlated results");
-            bool rejected = false;
-            try { HostJson.SerializeValue(new { UnsupportedContract = true }); }
-            catch (NotSupportedException) { rejected = true; }
-            Check(rejected, "unregistered runtime types fail without a reflection fallback");
+            Assert.Throws<NotSupportedException>(() => HostJson.SerializeValue(new { UnsupportedContract = true }));
 
             await ModelReplies();
             await Streaming(root);
@@ -82,12 +77,12 @@ internal static class SourceJsonChecks
         // Exercise the real model-reply repair path, including cloned options.
         var director = new Director(new OAuth(), (_, _) => new ReplyClient("```json\n" + reply[..^1] + ",}\n```"));
         var decision = await director.Decide(request, CancellationToken.None);
-        Check(decision.Steps.Single().CandidateId == "end_turn", "decision contracts and trailing-comma reply repair work with reflection disabled");
+        Assert.True(decision.Steps.Single().CandidateId == "end_turn", "decision contracts and trailing-comma reply repair work with reflection disabled");
         var communication = new CommunicationRequest("strict-communication", "strict", 1, 7, 1, 1, observation, ["team"], "规则");
         string communicationReply = JsonSerializer.Serialize(new AmbientReply(communication.RequestId, "team", "需要支援"), HostJson.Type<AmbientReply>());
         var communicator = new Director(new OAuth(), (_, _) => new ReplyClient(communicationReply));
         var result = await communicator.Communicate(communication, CancellationToken.None);
-        Check(result.Channel == "team" && result.Message == "需要支援", "communication contracts and agent tools work with reflection disabled");
+        Assert.True(result.Channel == "team" && result.Message == "需要支援", "communication contracts and agent tools work with reflection disabled");
     }
 
     static async Task Streaming(string root)
@@ -133,7 +128,7 @@ internal static class SourceJsonChecks
             var tool = AIFunctionFactory.Create((string query) => query, "lookup", "fixture", Files.Json);
             var response = await client.GetResponseAsync([new(ChatRole.User, "fixture")], new ChatOptions { Tools = [tool] });
             var call = response.Messages.Single().Contents.OfType<FunctionCallContent>().Single();
-            Check(call.CallId == "call-1" && call.Arguments!["query"]?.ToString() == "战争",
+            Assert.True(call.CallId == "call-1" && call.Arguments!["query"]?.ToString() == "战争",
                 provider + " streamed tool calls use generated contracts with reflection disabled");
         }
         const string responseEvents = """
@@ -145,7 +140,7 @@ internal static class SourceJsonChecks
             """;
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(responseEvents));
         var responseMessage = await SubscriptionClient.ReadResponseMessage(stream, CancellationToken.None);
-        Check(responseMessage.Contents.OfType<FunctionCallContent>().Single().CallId == "response-call", "Responses item.done fallback uses generated array and argument contracts");
+        Assert.True(responseMessage.Contents.OfType<FunctionCallContent>().Single().CallId == "response-call", "Responses item.done fallback uses generated array and argument contracts");
     }
 
     static async Task HttpEndpoints(string root, string? nativeHost)
@@ -199,21 +194,21 @@ internal static class SourceJsonChecks
                 if (ready) break;
                 await Task.Delay(100);
             }
-            Check(ready, "real host starts with generated HTTP contracts");
+            Assert.True(ready, "real host starts with generated HTTP contracts");
             var healthBody = await http.GetFromJsonAsync("/health", HostJson.Type<HealthResponse>());
-            Check(healthBody is { Ready: true, Framework: "Microsoft Agent Framework" }, "health response uses named generated contract");
+            Assert.True(healthBody is { Ready: true, Framework: "Microsoft Agent Framework" }, "health response uses named generated contract");
             using var save = await http.PutAsJsonAsync("/settings", new AgentConfig { ExtraRules = "HTTP 中文规则" }, HostJson.Type<AgentConfig>());
             var settings = await http.GetFromJsonAsync("/settings", HostJson.Type<AgentConfig>());
-            Check(save.IsSuccessStatusCode && settings?.ExtraRules == "HTTP 中文规则", "real settings endpoint binds and writes source-generated contracts");
+            Assert.True(save.IsSuccessStatusCode && settings?.ExtraRules == "HTTP 中文规则", "real settings endpoint binds and writes source-generated contracts");
             using var invalid = await http.PutAsJsonAsync("/settings", new AgentConfig { TimeoutSeconds = 1 }, HostJson.Type<AgentConfig>());
-            Check(invalid.StatusCode == HttpStatusCode.BadRequest, "invalid settings retain HTTP 400 validation");
+            Assert.True(invalid.StatusCode == HttpStatusCode.BadRequest, "invalid settings retain HTTP 400 validation");
             var accounts = await http.GetFromJsonAsync("/auth/accounts", HostJson.Type<AccountStatus[]>());
             var providers = await http.GetFromJsonAsync("/catalog/providers", HostJson.Type<List<CatalogProvider>>());
             var models = await http.GetFromJsonAsync("/catalog/grok/models", HostJson.Type<List<CatalogModel>>());
-            Check(accounts is { Length: > 0 } && providers?.Single().Id == "xai" && models?.Single().Id == "fixture", "account and catalog HTTP collections serialize without reflection");
+            Assert.True(accounts is { Length: > 0 } && providers?.Single().Id == "xai" && models?.Single().Id == "fixture", "account and catalog HTTP collections serialize without reflection");
             using var failure = await http.PostAsJsonAsync("/auth/missing/api-key", new ApiKeyRequest("fixture"), HostJson.Type<ApiKeyRequest>());
             using var problem = JsonDocument.Parse(await failure.Content.ReadAsStringAsync());
-            Check(failure.StatusCode == HttpStatusCode.UnprocessableEntity && problem.RootElement.GetProperty("status").GetInt32() == 422, "HTTP errors retain generated ProblemDetails responses");
+            Assert.True(failure.StatusCode == HttpStatusCode.UnprocessableEntity && problem.RootElement.GetProperty("status").GetInt32() == 422, "HTTP errors retain generated ProblemDetails responses");
             await CredentialEndpointChecks.Run(http, hostRoot);
             await NativeSdkChecks.Run(http, hostRoot);
             checksPassed = true;
@@ -223,7 +218,7 @@ internal static class SourceJsonChecks
             if (!host.HasExited) host.Kill(entireProcessTree: true);
             await host.WaitForExitAsync();
             string output = await stdout + await stderr;
-            if (!checksPassed) Console.WriteLine(output);
+            if (!checksPassed) throw new Exception("HTTP endpoint checks failed; host output:" + Environment.NewLine + output);
         }
     }
 

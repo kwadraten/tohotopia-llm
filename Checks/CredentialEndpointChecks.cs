@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Tohotopia;
+using Xunit;
 
 static class CredentialEndpointChecks
 {
@@ -59,9 +60,5 @@ static class CredentialEndpointChecks
         Check(blank.StatusCode == HttpStatusCode.UnprocessableEntity && !File.Exists(CredentialPaths.File(root, "deepseek.token")),
             "PUT cannot create an account from an absent blank secret");
     }
-    static void Check(bool value, string message)
-    {
-        if (!value) throw new Exception(message);
-        Console.WriteLine("PASS " + message);
-    }
+    static void Check(bool value, string message) => Assert.True(value, message);
 }

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using Microsoft.Extensions.AI;
 using Tohotopia;
 
@@ -57,7 +58,10 @@ internal static class StreamingChecks
         throw new Exception(provider + " accepted truncated stream");
     }
 
-    static string Sse(object value) => "data: " + JsonSerializer.Serialize(value) + "\n\n";
+    // The test host runs with JsonSerializer.IsReflectionEnabledByDefault=false;
+    // anonymous event payloads opt back into an explicit reflection resolver.
+    static readonly JsonSerializerOptions SseJson = new() { TypeInfoResolver = new DefaultJsonTypeInfoResolver() };
+    static string Sse(object value) => "data: " + JsonSerializer.Serialize(value, SseJson) + "\n\n";
     sealed class SmallReads(string text) : MemoryStream(Encoding.UTF8.GetBytes(text))
     {
         internal int BytesRead;
