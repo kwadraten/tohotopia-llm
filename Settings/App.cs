@@ -19,6 +19,9 @@ public sealed partial class App : Application
             desktop.ShutdownMode = ShutdownMode.OnMainWindowClose;
             mainWindow = new SettingsWindow();
             desktop.MainWindow = mainWindow;
+            // Subscribers get no installer; the panel restores its own
+            // desktop entry point on every launch.
+            DesktopShortcut.Ensure();
         }
         base.OnFrameworkInitializationCompleted();
         // Shell-launched instances occasionally start hidden although the
