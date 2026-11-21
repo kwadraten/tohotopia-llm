@@ -12,7 +12,7 @@ public class EnvironmentTests
     {
         string? path = Environment.GetEnvironmentVariable("TOHOTOPIA_LOADER_DLL");
         if (string.IsNullOrEmpty(path) || !File.Exists(path)) Assert.Skip("Set TOHOTOPIA_LOADER_DLL to an installed TH1.Hotfix.dll");
-        CheckLoaderMetadata(path);
+        AuditLoaderMetadata(path);
     }
 
     [Fact]
@@ -20,10 +20,10 @@ public class EnvironmentTests
     {
         string? root = Environment.GetEnvironmentVariable("TOHOTOPIA_PACKAGE_DIR");
         if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) Assert.Skip("Set TOHOTOPIA_PACKAGE_DIR to a built dist\\LLMBattle folder");
-        CheckBuiltPackage(Path.GetFullPath(root));
+        AuditBuiltPackage(Path.GetFullPath(root));
     }
 
-    static void CheckLoaderMetadata(string path)
+    static void AuditLoaderMetadata(string path)
     {
         using var stream = File.OpenRead(path);
         using var pe = new System.Reflection.PortableExecutable.PEReader(stream);
@@ -45,14 +45,14 @@ public class EnvironmentTests
             allProperties.UnionWith(type.GetProperties().Select(p => metadata.GetString(metadata.GetPropertyDefinition(p).Name)));
             if (name == "TH1ModFramework.ModLoader") setOverrideCount = names.Count(n => n == "SetMethodOverride");
         }
-        var unresolved = GameMemberReferences(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Mod"))
+        var unresolved = GameMemberReferences(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "Mod"))
             .Where(r => r.Static != null
                 ? !staticFields.TryGetValue(r.Static, out var declared) || !declared.Contains(r.Name)
                 : r.Field ? !allFields.Contains(r.Name)
                 : !allMethods.Contains(r.Name) && !CommonMembers.Contains(r.Name) && !(r.Name.StartsWith("get_") && allProperties.Contains(r.Name[4..])))
             .Select(r => r.File + ": " + (r.Static != null ? r.Static + "." : "") + r.Name).Distinct().ToArray();
         Assert.True(unresolved.Length == 0, "every game field and method named by the mod exists in the installed game" + (unresolved.Length > 0 ? ": " + string.Join(", ", unresolved) : ""));
-        GameAccessAudit.Run(path, Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Mod"), Assert.True);
+        GameAccessAudit.Run(path, Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "Mod"), Assert.True);
         Assert.True(setOverrideCount == 2, "installed loader offers the chained SetMethodOverride used since 0.8.031");
         foreach (var (type, names) in new[] {
             ("TH1ModFramework.ModLoader", new[] { "SetMethodOverride", "TryResolveMethod", "LogToFile", "CollectModFolders", "LoadOrder" }),
@@ -62,7 +62,7 @@ public class EnvironmentTests
             Assert.True(methods.TryGetValue(type, out var available) && names.All(available.Contains), "installed loader exports required methods: " + type);
     }
 
-    static void CheckBuiltPackage(string root)
+    static void AuditBuiltPackage(string root)
     {
         foreach (string file in new[] { "mod.dll", "mod_loader.txt", "mod_info.json", "package.build", "preview.png", "settings.example.json", "README.txt", "Remove-BepInEx.ps1", "Remove-BepInEx.bat", "AgentHost/AgentHost.exe", "Settings/TH1LLMBattlePanel.exe" })
             Assert.True(File.Exists(Path.Combine(root, file)), "published package includes " + file);
@@ -70,7 +70,7 @@ public class EnvironmentTests
             Assert.True(!Directory.EnumerateFiles(Path.Combine(root, component), "*", SearchOption.AllDirectories)
                 .Any(f => Path.GetFileName(f) is "coreclr.dll" or "hostfxr.dll" or "hostpolicy.dll" || f.EndsWith(".runtimeconfig.json") || f.EndsWith(".pdb") || f.EndsWith(component + ".dll")),
                 component + " is a self-contained NativeAOT executable without runtime host files or symbols");
-        var context = new System.Runtime.Loader.AssemblyLoadContext("package-check", isCollectible: true);
+        var context = new System.Runtime.Loader.AssemblyLoadContext("package-test", isCollectible: true);
         try
         {
             var assembly = context.LoadFromAssemblyPath(Path.Combine(root, "mod.dll"));

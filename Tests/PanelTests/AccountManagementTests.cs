@@ -39,29 +39,29 @@ public class AccountManagementTests
         {
             window.Show();
             await Until(() => Selected(window, "deepseek") && Status(window).Contains("DeepSeek"));
-            Check(Button(window, "编辑 API Key").IsVisible && Button(window, "重新登录订阅").IsVisible,
+            Expect(Button(window, "编辑 API Key").IsVisible && Button(window, "重新登录订阅").IsVisible,
                 "an existing DeepSeek API key offers editing and keeps subscription login separate");
-            Check(!Named<Select>(window, "AuthProvider").IsVisible, "provider selection is removed from the main account panel");
+            Expect(!Named<Select>(window, "AuthProvider").IsVisible, "provider selection is removed from the main account panel");
 
             Click(window, "编辑 API Key");
             Click(window, "编辑 API Key");
             await Until(() => window.OwnedWindows.OfType<ApiKeyDialog>().Count() == 1);
-            Check(handler.CredentialReads == 1, "repeated credential clicks create only one dialog and one metadata request");
+            Expect(handler.CredentialReads == 1, "repeated credential clicks create only one dialog and one metadata request");
             var dialog = window.OwnedWindows.OfType<ApiKeyDialog>().Single();
-            Check(dialog.KeepSecret && Named<TextBox>(dialog, "Credential_apiKey").Text == ""
+            Expect(dialog.KeepSecret && Named<TextBox>(dialog, "Credential_apiKey").Text == ""
                 && Named<TextBox>(dialog, "Credential_apiKey").PasswordChar != '\0'
                 && dialog.Value("baseUrl") == "https://api.deepseek.com"
                 && dialog.Value("workspaceId") == "workspace-old",
                 "editing prefills only non-secret metadata and never reads the old secret into the UI");
             Click(dialog, "取消");
             await Until(() => !window.OwnedWindows.OfType<ApiKeyDialog>().Any());
-            Check(handler.WriteAttempts.Count == 0, "canceling credential editing performs no mutation");
+            Expect(handler.WriteAttempts.Count == 0, "canceling credential editing performs no mutation");
 
             dialog = await OpenEditor(window);
             var providerPicker = Named<Select>(dialog, "Credential_Provider");
             providerPicker.SelectedItem = providerPicker.ItemsSource!.Cast<CatalogProvider>().Single(provider => provider.Id == "google");
             await Until(() => dialog.ProviderId == "google");
-            Check(dialog.Title?.Contains("Google") == true && Selected(window, "deepseek") && handler.WriteAttempts.Count == 0,
+            Expect(dialog.Title?.Contains("Google") == true && Selected(window, "deepseek") && handler.WriteAttempts.Count == 0,
                 "the dialog switches provider-specific forms without changing the main panel or writing credentials");
             Click(dialog, "取消");
             await Until(() => !window.OwnedWindows.OfType<ApiKeyDialog>().Any());
@@ -72,18 +72,18 @@ public class AccountManagementTests
             Named<TextBox>(dialog, "Credential_workspaceId").Text = "workspace-new";
             Click(dialog, "保存");
             await Until(() => handler.WriteAttempts.Count == 1);
-            Check(handler.WriteAttempts[0].Method == HttpMethod.Put && handler.WriteAttempts[0].Input.ApiKey == ""
+            Expect(handler.WriteAttempts[0].Method == HttpMethod.Put && handler.WriteAttempts[0].Input.ApiKey == ""
                 && handler.WriteAttempts[0].Input.BaseUrl == "https://api.deepseek.cn"
                 && handler.WriteAttempts[0].Input.WorkspaceId == "workspace-new"
                 && handler.Secrets["deepseek"] == "original-key",
                 "editing with an empty key uses PUT, updates metadata and preserves the existing secret");
 
             dialog = await OpenEditor(window);
-            Check(Named<TextBox>(dialog, "Credential_apiKey").Text == "", "a subsequent edit still does not reveal the preserved secret");
+            Expect(Named<TextBox>(dialog, "Credential_apiKey").Text == "", "a subsequent edit still does not reveal the preserved secret");
             Named<TextBox>(dialog, "Credential_apiKey").Text = "replacement-key";
             Click(dialog, "保存");
             await Until(() => handler.WriteAttempts.Count == 2);
-            Check(handler.WriteAttempts[1].Method == HttpMethod.Put && handler.Secrets["deepseek"] == "replacement-key",
+            Expect(handler.WriteAttempts[1].Method == HttpMethod.Put && handler.Secrets["deepseek"] == "replacement-key",
                 "a non-empty replacement key updates the existing credential");
 
             int writesBeforeLogin = handler.WriteAttempts.Count;
@@ -92,7 +92,7 @@ public class AccountManagementTests
             await Until(() => Button(window, "重新登录订阅").IsVisible);
             Click(window, "重新登录订阅");
             await Until(() => handler.Starts.Contains("deepseek"));
-            Check(handler.WriteAttempts.Count == writesBeforeLogin && handler.Credentials["deepseek"].AuthType == "subscription",
+            Expect(handler.WriteAttempts.Count == writesBeforeLogin && handler.Credentials["deepseek"].AuthType == "subscription",
                 "relogin for an existing DeepSeek subscription does not force an API key overwrite");
             Select(window, "openai");
             await window.ProviderChange;
@@ -107,14 +107,14 @@ public class AccountManagementTests
             Named<TextBox>(dialog, "Credential_apiKey").Text = "rejected-key";
             Click(dialog, "保存");
             await Until(() => Status(window).Contains("fixture write failed"));
-            Check(!window.IsClosed && handler.Secrets["deepseek"] == "replacement-key" && StatusAlert(window).Tone == AlertTone.Danger,
+            Expect(!window.IsClosed && handler.Secrets["deepseek"] == "replacement-key" && StatusAlert(window).Tone == AlertTone.Danger,
                 "an HTTP credential failure is shown in an Alert without killing the window or replacing the old secret");
             handler.FailWrites = false;
 
             failDialogConstruction = true;
             Click(window, "编辑 API Key");
             await Until(() => Status(window).Contains("fixture dialog constructor failed"));
-            Check(!window.IsClosed && Button(window, "编辑 API Key").IsEnabled,
+            Expect(!window.IsClosed && Button(window, "编辑 API Key").IsEnabled,
                 "a dialog constructor failure is contained and credential actions become available again");
             failDialogConstruction = false;
 
@@ -122,30 +122,30 @@ public class AccountManagementTests
             int readsBeforeFailedOpen = handler.CredentialReads;
             Click(window, "编辑 API Key");
             await Until(() => handler.CredentialReads == readsBeforeFailedOpen + 1 && StatusAlert(window).Title == "凭据操作失败");
-            Check(!window.IsClosed && Button(window, "编辑 API Key").IsEnabled,
+            Expect(!window.IsClosed && Button(window, "编辑 API Key").IsEnabled,
                 "a dialog opening failure is contained and does not leave reentrancy locked");
             closeDialogBeforeOpen = false;
 
             denyPreference = true;
             Select(window, "openai");
             await Until(() => Named<Alert>(window, "AccountPreferenceStatus").IsOpen);
-            Check(Selected(window, "openai") && !window.IsClosed && Status(window).Contains("OpenAI"),
+            Expect(Selected(window, "openai") && !window.IsClosed && Status(window).Contains("OpenAI"),
                 "UnauthorizedAccessException while saving account-ui preference leaves provider selection and loading alive");
             Click(window, "重新登录订阅");
             await Until(() => handler.Starts.Contains("openai"));
-            Check(!window.IsClosed && Named<Alert>(window, "AccountPreferenceStatus").IsOpen,
+            Expect(!window.IsClosed && Named<Alert>(window, "AccountPreferenceStatus").IsOpen,
                 "provider login continues after preference persistence is denied and keeps the independent warning visible");
 
             Select(window, "deepseek");
             await window.ProviderChange;
             var openAiActions = Actions(window, "openai");
-            Check(Button(openAiActions, "重新授权").IsVisible
+            Expect(Button(openAiActions, "重新授权").IsVisible
                 && !Controls(openAiActions).OfType<TKCode.Arc.Button>().Single(button => button.Content?.ToString() == "编辑").IsVisible,
                 "subscription rows expose reauthorization rather than API key editing");
             handler.FailStarts = true;
             Click(openAiActions, "重新授权");
             await Until(() => Status(window).Contains("fixture start failed"));
-            Check(Selected(window, "openai") && handler.Accounts("openai").Configured
+            Expect(Selected(window, "openai") && handler.Accounts("openai").Configured
                 && handler.Credentials["openai"].AuthType == "subscription",
                 "row reauthorization selects its provider and a failed login preserves the old authorization");
             handler.FailStarts = false;
@@ -156,11 +156,11 @@ public class AccountManagementTests
             Click(openAiActions, "移除");
             Click(openAiActions, "移除");
             await Until(() => window.OwnedWindows.Count(item => item.Title == "移除账号") == 1);
-            Check(handler.Deletes.Count == 0, "repeated remove clicks open one confirmation and send no premature delete");
+            Expect(handler.Deletes.Count == 0, "repeated remove clicks open one confirmation and send no premature delete");
             Click(window.OwnedWindows.Single(item => item.Title == "移除账号"), "取消");
             await Until(() => !window.OwnedWindows.Any(item => item.Title == "移除账号"));
             await Task.Delay(30);
-            Check(handler.Deletes.Count == 0 && handler.Accounts("openai").Configured,
+            Expect(handler.Deletes.Count == 0 && handler.Accounts("openai").Configured,
                 "canceling removal sends no request and retains the account");
 
             openAiActions = Actions(window, "openai");
@@ -169,7 +169,7 @@ public class AccountManagementTests
             await Until(() => window.OwnedWindows.Any(item => item.Title == "移除账号"));
             Click(window.OwnedWindows.Single(item => item.Title == "移除账号"), "确认移除");
             await Until(() => handler.Deletes.Contains("openai") && Rows(window).All(row => row.Id != "openai"));
-            Check(handler.Deletes.SequenceEqual(["openai"]) && Rows(window).Any(row => row.Id == "deepseek")
+            Expect(handler.Deletes.SequenceEqual(["openai"]) && Rows(window).Any(row => row.Id == "deepseek")
                 && handler.CatalogReads > catalogReads,
                 "confirmed removal deletes only its provider and refreshes accounts and model availability");
 
@@ -180,23 +180,23 @@ public class AccountManagementTests
             await Until(() => window.OwnedWindows.Any(item => item.Title?.StartsWith("连通性测试") == true));
             var pingDialog = window.OwnedWindows.Single(item => item.Title?.StartsWith("连通性测试") == true);
             var pingText = Named<TextBox>(pingDialog, "PingResultText");
-            Check(pingText.Text?.Contains("deepseek-model") == true && pingText.Text.Contains("Pong!")
+            Expect(pingText.Text?.Contains("deepseek-model") == true && pingText.Text.Contains("Pong!")
                 && pingText.Text.Contains("Ping! Just answer me"), "connectivity test shows the exact probe, chosen model and reply");
             Click(pingDialog, "关闭");
             await Until(() => !window.OwnedWindows.Any(item => item.Title?.StartsWith("连通性测试") == true)
                 && Status(window).Contains("连通性正常"));
-            Check(handler.Pings.SequenceEqual(["deepseek"]),
+            Expect(handler.Pings.SequenceEqual(["deepseek"]),
                 "connectivity test reports success through the account status area");
             handler.PingFailures["deepseek"] = "模型请求被服务拒绝：HTTP 429。quota exhausted";
             Click(Actions(window, "deepseek"), "连通性测试");
             await Until(() => window.OwnedWindows.Any(item => item.Title?.StartsWith("连通性测试") == true));
             pingDialog = window.OwnedWindows.Single(item => item.Title?.StartsWith("连通性测试") == true);
             pingText = Named<TextBox>(pingDialog, "PingResultText");
-            Check(pingText.Text?.Contains("HTTP 429") == true && pingText.Text.Contains("quota exhausted"),
+            Expect(pingText.Text?.Contains("HTTP 429") == true && pingText.Text.Contains("quota exhausted"),
                 "connectivity test displays complete server errors such as 429");
             Click(pingDialog, "关闭");
             await Until(() => Status(window).Contains("HTTP 429"));
-            Check(StatusAlert(window).Tone == AlertTone.Danger,
+            Expect(StatusAlert(window).Tone == AlertTone.Danger,
                 "connectivity failures surface in the account status area");
 
             Select(window, "deepseek");
@@ -209,7 +209,7 @@ public class AccountManagementTests
             await window.ProviderChange;
             handler.StartGate.SetResult();
             await Task.Delay(50);
-            Check(!Status(window).Contains("DEVICE-deepseek") && Selected(window, "openai"),
+            Expect(!Status(window).Contains("DEVICE-deepseek") && Selected(window, "openai"),
                 "a late login result cannot overwrite the state of a newly selected provider");
 
             Select(window, "deepseek");
@@ -223,7 +223,7 @@ public class AccountManagementTests
             Click(dialog, "保存");
             await Until(() => handler.WriteAttempts.Count == writesBeforeDialogSave + 1);
             var dialogWrite = handler.WriteAttempts[^1];
-            Check(dialogWrite.Method == HttpMethod.Post && dialogWrite.Provider == "google"
+            Expect(dialogWrite.Method == HttpMethod.Post && dialogWrite.Provider == "google"
                 && handler.Secrets["google"] == "google-dialog-key" && Selected(window, "google"),
                 "saving uses the dialog's selected provider and synchronizes the hidden main selection");
 
@@ -235,7 +235,7 @@ public class AccountManagementTests
             window.StopServices();
             window.Close();
             await Task.Delay(50);
-            Check(handler.WriteAttempts.Count == writesBeforeClose,
+            Expect(handler.WriteAttempts.Count == writesBeforeClose,
                 "closing the owner while a credential dialog is open cannot save a late result");
         }
         finally

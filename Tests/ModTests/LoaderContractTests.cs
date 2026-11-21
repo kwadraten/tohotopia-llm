@@ -66,7 +66,7 @@ public class LoaderContractTests
     public void Shared_room_files_and_diagnostic_logs_use_the_loader_adapter()
     {
         var config = new RoomConfig { AIs = new() { new AISeat { Provider = "openai", Model = "test", TeamId = 2 } } };
-        var dir = Path.Combine(Path.GetTempPath(), "llm-loader-check-" + Guid.NewGuid().ToString("N"));
+        var dir = Path.Combine(Path.GetTempPath(), "llm-loader-test-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         try
         {

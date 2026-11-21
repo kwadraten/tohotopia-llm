@@ -16,7 +16,7 @@ public class MigrationTests
     [Fact]
     public async Task Settings_window_pages_and_logs() => await Ui.Run(async () =>
     {
-        Check(!JsonSerializer.IsReflectionEnabledByDefault, "Settings JSON reflection is disabled");
+        Expect(!JsonSerializer.IsReflectionEnabledByDefault, "Settings JSON reflection is disabled");
         string root = Path.Combine(Path.GetTempPath(), "tohotopia-avalonia-check-" + Guid.NewGuid().ToString("N"));
         var oldRoot = Environment.GetEnvironmentVariable("TOHOTOPIA_LLM_DATA");
         Environment.SetEnvironmentVariable("TOHOTOPIA_LLM_DATA", root);
@@ -27,7 +27,7 @@ public class MigrationTests
         RoomFiles.Write(legacyRoot, "settings.json", new AgentConfig { TimeoutSeconds = 111 });
         File.WriteAllText(Path.Combine(legacyRoot, "deepseek.token"), "legacy-credential");
         RuntimePaths.MigrateSettings(root, legacyRoot);
-        Check(RoomFiles.Read<AgentConfig>(root, "settings.json")?.TimeoutSeconds == 111
+        Expect(RoomFiles.Read<AgentConfig>(root, "settings.json")?.TimeoutSeconds == 111
             && !File.Exists(Path.Combine(root, "deepseek.token")), "runtime migration preserves ordinary settings without importing legacy credentials");
         File.WriteAllText(Path.Combine(root, "bridge.token"), "fixture-token");
         Files.Save(new AgentConfig { ExtraRules = "原有规则", TimeoutSeconds = 123, MaxDecisionsPerTurn = 77 });
@@ -39,85 +39,85 @@ public class MigrationTests
         try
         {
             window.Show();
-            Check(window.Icon != null, "main window receives the application icon");
+            Expect(window.Icon != null, "main window receives the application icon");
             var iconDialog = new Window();
             iconDialog.Show(window);
-            Check(iconDialog.Icon != null, "secondary windows inherit the application icon");
+            Expect(iconDialog.Icon != null, "secondary windows inherit the application icon");
             iconDialog.Close();
             await Until(() => Named<Select>(window, "AuthProvider").SelectedItem is CatalogProvider);
             var ribbon = Named<Ribbon>(window, "SettingsTabs");
-            Check(window.Title == "帝国幻想乡 · AI 接管设置" && ribbon.Tabs.Count == 4
+            Expect(window.Title == "帝国幻想乡 · AI 接管设置" && ribbon.Tabs.Count == 4
                 && ribbon.SelectedIndex == 0 && ribbon.Tabs.SelectMany(tab => tab.Groups).All(group => !group.CanCollapse), "all four pages and their commands use the fixed Ribbon");
             ribbon.IsMinimized = true;
-            Check(!ribbon.IsMinimized, "the Ribbon cannot be minimized by a command or keyboard shortcut");
+            Expect(!ribbon.IsMinimized, "the Ribbon cannot be minimized by a command or keyboard shortcut");
             var pages = Controls(window).OfType<StackPanel>().Where(panel => panel.MaxWidth == Settings.Ui.PageWidth).ToList();
-            Check(pages.Count == 4 && pages.All(panel => panel.HorizontalAlignment == HorizontalAlignment.Center), "all page bodies have an explicit centered maximum-width layout");
-            Check(Controls(window).OfType<Checkbox>().All(c => c.Name != "CloseToTray"), "the standalone panel offers no tray-residency option");
+            Expect(pages.Count == 4 && pages.All(panel => panel.HorizontalAlignment == HorizontalAlignment.Center), "all page bodies have an explicit centered maximum-width layout");
+            Expect(Controls(window).OfType<Checkbox>().All(c => c.Name != "CloseToTray"), "the standalone panel offers no tray-residency option");
             var seatCount = Named<NumberField>(window, "SeatCount");
             var callbackInput = Named<TextBox>(window, "AuthCallback");
             seatCount.Measure(new Size(220, 100));
             callbackInput.Measure(new Size(220, 100));
-            Check(seatCount.DesiredSize.Height > 0 && Math.Abs(seatCount.DesiredSize.Height - callbackInput.DesiredSize.Height) <= 1, "the number field matches the input height");
+            Expect(seatCount.DesiredSize.Height > 0 && Math.Abs(seatCount.DesiredSize.Height - callbackInput.DesiredSize.Height) <= 1, "the number field matches the input height");
             var idle = new SettingsWindow(new HttpClient(new HostFixture()) { BaseAddress = new Uri("http://fixture") }, initializeOnOpen: false);
             idle.Show();
-            Check(Controls(idle).OfType<TKCode.Arc.Button>().Count(b => b.Content?.ToString() == "登录订阅账号" && b.IsVisible) == 1, "subscription login is hidden until a provider with both API key and subscription is selected");
+            Expect(Controls(idle).OfType<TKCode.Arc.Button>().Count(b => b.Content?.ToString() == "登录订阅账号" && b.IsVisible) == 1, "subscription login is hidden until a provider with both API key and subscription is selected");
             idle.StopServices();
             idle.Close();
-            Check(Controls(window).OfType<TKCode.Arc.Button>().Count(b => b.Content?.ToString() == "登录订阅账号" && b.IsVisible) == 1
+            Expect(Controls(window).OfType<TKCode.Arc.Button>().Count(b => b.Content?.ToString() == "登录订阅账号" && b.IsVisible) == 1
                 && Controls(window).OfType<TKCode.Arc.Button>().Any(b => b.Content?.ToString() == "填写信息" && b.IsVisible), "a provider with both methods shows the API key button and the subscription login");
-            Check(Named<NumberField>(window, "Timeout").Value == 123 && Named<TextBox>(window, "ExtraRules").Text == "原有规则", "existing global configuration is restored");
-            Check(((CatalogProvider)Named<Select>(window, "AuthProvider").SelectedItem!).Id == "xai", "persisted account selection restores provider aliases");
-            Check(((CatalogModel)Named<Select>(window, "Seat1Model").SelectedItem!).Id == "xai-model"
+            Expect(Named<NumberField>(window, "Timeout").Value == 123 && Named<TextBox>(window, "ExtraRules").Text == "原有规则", "existing global configuration is restored");
+            Expect(((CatalogProvider)Named<Select>(window, "AuthProvider").SelectedItem!).Id == "xai", "persisted account selection restores provider aliases");
+            Expect(((CatalogModel)Named<Select>(window, "Seat1Model").SelectedItem!).Id == "xai-model"
                 && Named<Select>(window, "Seat1Reasoning").SelectedItem?.ToString() == "high"
                 && ((CatalogModel)Named<Select>(window, "Seat2Model").SelectedItem!).Id == "model-b", "saved seat order, provider, model and reasoning survive migration");
             var firstModel = Named<Select>(window, "Seat1Model");
             firstModel.SelectedItem = firstModel.ItemsSource!.Cast<CatalogModel>().Single(m => m.Id == "xai-simple");
             await Until(() => Named<Select>(window, "Seat1Reasoning").SelectedItem?.ToString() == "default");
-            Check(Named<Select>(window, "Seat1Reasoning").Items.Count == 1, "changing model refreshes supported reasoning levels");
+            Expect(Named<Select>(window, "Seat1Reasoning").Items.Count == 1, "changing model refreshes supported reasoning levels");
             Named<NumberField>(window, "SeatCount").Value = 4;
             await Until(() => Named<Select>(window, "Seat4Model").SelectedItem is CatalogModel);
             Click(window, "保存接管配置");
             var room = RoomFiles.Read<RoomConfig>(root, "room.json")!;
-            Check(room.AIs.Count == 4 && room.NativeLobby && room.Published && !room.UseModels && room.AIs[0].Model == "xai-simple", "saving four seats preserves native-lobby and automatic-control settings");
+            Expect(room.AIs.Count == 4 && room.NativeLobby && room.Published && !room.UseModels && room.AIs[0].Model == "xai-simple", "saving four seats preserves native-lobby and automatic-control settings");
             Click(window, "启用模型接管");
             var enable = RoomFiles.Read<RoomCommand>(root, "room-command.json")!;
             Click(window, "恢复原生 AI");
             var restore = RoomFiles.Read<RoomCommand>(root, "room-command.json")!;
-            Check(enable.Action == "models" && restore.Action == "native" && enable.Id != restore.Id, "takeover controls retain command protocol and unique IDs");
+            Expect(enable.Action == "models" && restore.Action == "native" && enable.Id != restore.Id, "takeover controls retain command protocol and unique IDs");
             RoomFiles.Write(root, "room-status.json", new RoomStatus("playing", "fixture", ModelsEnabled: true));
             Click(window, "保存接管配置");
-            Check(RoomFiles.Read<RoomConfig>(root, "room.json")!.Revision == room.Revision && Named<Alert>(window, "ActionStatus").Content?.ToString()?.Contains("请先恢复") == true
+            Expect(RoomFiles.Read<RoomConfig>(root, "room.json")!.Revision == room.Revision && Named<Alert>(window, "ActionStatus").Content?.ToString()?.Contains("请先恢复") == true
                 && Named<Alert>(window, "ActionStatus").Tone == AlertTone.Danger, "editing a live model-controlled match is blocked by a full-width Alert");
             Click(window, "停用接管配置");
-            Check(RoomFiles.Read<RoomConfig>(root, "room.json") is { Published: false }, "stopping takeover preserves the room and unpublishes configuration");
+            Expect(RoomFiles.Read<RoomConfig>(root, "room.json") is { Published: false }, "stopping takeover preserves the room and unpublishes configuration");
             Named<NumberField>(window, "Timeout").Value = 60;
             Named<TextBox>(window, "ExtraRules").Text = "新的规则\n第二行";
             Click(window, "保存全局规则");
             await Until(() => handler.Saved is not null);
-            Check(handler.Saved is { TimeoutSeconds: 60, ExtraRules: "新的规则\n第二行", MaxDecisionsPerTurn: 77 }, "global settings use the existing host API and preserve unchanged values");
+            Expect(handler.Saved is { TimeoutSeconds: 60, ExtraRules: "新的规则\n第二行", MaxDecisionsPerTurn: 77 }, "global settings use the existing host API and preserve unchanged values");
             Click(window, "登录订阅账号");
             await Until(() => Named<Alert>(window, "AuthStatus").Content?.ToString()?.Contains("DEVICE-CODE") == true);
             Named<TextBox>(window, "AuthCallback").Text = "  fixture-callback  ";
             Click(window, "提交授权");
             await Until(() => handler.Callback is not null);
-            Check(handler.Callback == "fixture-callback" && Named<TextBox>(window, "AuthCallback").Text == "", "subscription login and callback submission retain their HTTP contract");
+            Expect(handler.Callback == "fixture-callback" && Named<TextBox>(window, "AuthCallback").Text == "", "subscription login and callback submission retain their HTTP contract");
 
             Click(window, "填写信息");
             await Until(() => window.OwnedWindows.OfType<ApiKeyDialog>().Any());
             var credentialDialog = window.OwnedWindows.OfType<ApiKeyDialog>().Single();
             Click(credentialDialog, "保存");
             await Until(() => Named<Alert>(credentialDialog, "CredentialValidation").IsOpen);
-            Check(handler.ApiKey is null, "required credential validation blocks empty submissions");
+            Expect(handler.ApiKey is null, "required credential validation blocks empty submissions");
             Named<TextBox>(credentialDialog, "Credential_apiKey").Text = " fixture-key ";
             Click(credentialDialog, "保存");
             await Until(() => handler.ApiKey is not null);
-            Check(handler.ApiKey == "fixture-key", "API key dialog returns values to the existing host endpoint");
+            Expect(handler.ApiKey == "fixture-key", "API key dialog returns values to the existing host endpoint");
 
             var dialog = new ApiKeyDialog("Fixture", new("api", "填写信息", [new("secret", "apiKey", "API Key", Required: true),
                 new("select", "baseUrl", "区域", Options: [new("国际站", "https://fixture/v1"), new("中国站", "https://other/v1")]),
                 new("text", "workspaceId", "Workspace", DefaultValue: "default")]));
             Named<TextBox>(dialog, "Credential_apiKey").Text = " fixture-key ";
-            Check(Named<TextBox>(dialog, "Credential_apiKey").PasswordChar != '\0' && dialog.Value("apiKey") == "fixture-key"
+            Expect(Named<TextBox>(dialog, "Credential_apiKey").PasswordChar != '\0' && dialog.Value("apiKey") == "fixture-key"
                 && dialog.Value("baseUrl") == "https://fixture/v1" && dialog.Value("workspaceId") == "default", "API key dialog retains masking, select values, defaults and trimmed input");
             dialog.Close();
 
@@ -128,20 +128,20 @@ public class MigrationTests
             AgentEvents.Write(root, new(DateTimeOffset.UtcNow, "host", "reasoning_delta", "思考二", AiSlot: 1, RequestId: "r1"));
             Click(window, "立即刷新");
             var logs = Named<Table>(window, "AgentLogs");
-            Check(!logs.ItemsSource!.Cast<AgentEvent>().Any(e => e.Stage == "reasoning_delta"), "unfinished reasoning stays hidden");
+            Expect(!logs.ItemsSource!.Cast<AgentEvent>().Any(e => e.Stage == "reasoning_delta"), "unfinished reasoning stays hidden");
             AgentEvents.Write(root, new(DateTimeOffset.UtcNow, "host", "model_decision", "decision", AiSlot: 1, RequestId: "r1"));
             AgentEvents.Write(root, new(DateTimeOffset.UtcNow, "game", "executed", "执行\n第二行", "error", AiSlot: 2, RequestId: "r2"));
             AgentEvents.Write(root, new(DateTimeOffset.UtcNow, "host", "model_failed", "HTTP 401: invalid_request_error\n完整错误第二行", "error", AiSlot: 1, RequestId: "r3"));
             Click(window, "立即刷新");
-            Check(logs.ItemsSource!.Cast<AgentEvent>().Single(e => e.Stage == "reasoning_delta").Message == "思考一思考二", "completed reasoning fragments merge without losing correlation");
+            Expect(logs.ItemsSource!.Cast<AgentEvent>().Single(e => e.Stage == "reasoning_delta").Message == "思考一思考二", "completed reasoning fragments merge without losing correlation");
             var failed = logs.ItemsSource!.Cast<AgentEvent>().Single(e => e.Stage == "model_failed");
             var detail = (TKCode.Arc.Button)logs.Columns.Single(column => column.Header == "详情").CellTemplate!.Build(failed)!;
-            Check(detail.Content?.ToString() == "查看详情", "each Agent row exposes an explicit full-details button");
+            Expect(detail.Content?.ToString() == "查看详情", "each Agent row exposes an explicit full-details button");
             Click(detail, "查看详情");
             await Until(() => window.OwnedWindows.Any(item => item.Title?.StartsWith("日志详情") == true));
             var detailDialog = window.OwnedWindows.Single(item => item.Title?.StartsWith("日志详情") == true);
             var detailText = Named<TextBox>(detailDialog, "AgentLogDetailText");
-            Check(detailText.Text?.Contains("HTTP 401: invalid_request_error\n完整错误第二行") == true
+            Expect(detailText.Text?.Contains("HTTP 401: invalid_request_error\n完整错误第二行") == true
                 && detailText.Text.Contains("请求 ID：r3"), "the details dialog retains the complete multiline model error and request correlation");
             Click(detailDialog, "关闭");
             await Until(() => !window.OwnedWindows.Any(item => item.Title?.StartsWith("日志详情") == true));
@@ -151,26 +151,26 @@ public class MigrationTests
             await Until(() => window.OwnedWindows.Any(item => item.Title?.StartsWith("日志详情") == true));
             detailDialog = window.OwnedWindows.Single(item => item.Title?.StartsWith("日志详情") == true);
             detailText = Named<TextBox>(detailDialog, "AgentLogDetailText");
-            Check(detailText.Text?.Contains("decision") == true && detailText.Text.Contains("思考一思考二"),
+            Expect(detailText.Text?.Contains("decision") == true && detailText.Text.Contains("思考一思考二"),
                 "the details dialog includes complete reasoning and model output related to the same request");
             Click(detailDialog, "关闭");
             await Until(() => !window.OwnedWindows.Any(item => item.Title?.StartsWith("日志详情") == true));
-            Check(!Controls(window).OfType<TKCode.Arc.TabItem>().Any(tab => tab.Header?.ToString() == "游戏运行日志"), "the obsolete BepInEx game-log tab is removed");
-            Check(Named<Alert>(window, "LogStatus").IsOpen && Named<Alert>(window, "LogStatus").Content?.ToString()?.Contains("只有‘游戏执行’") == true, "log diagnostics use a wrapping Alert");
+            Expect(!Controls(window).OfType<TKCode.Arc.TabItem>().Any(tab => tab.Header?.ToString() == "游戏运行日志"), "the obsolete BepInEx game-log tab is removed");
+            Expect(Named<Alert>(window, "LogStatus").IsOpen && Named<Alert>(window, "LogStatus").Content?.ToString()?.Contains("只有‘游戏执行’") == true, "log diagnostics use a wrapping Alert");
             Named<Checkbox>(window, "ErrorsOnly").IsChecked = true;
             var retained = logs.ItemsSource!.Cast<AgentEvent>().ToList();
-            Check(retained.Any(e => e.Stage == "executed") && retained.Single(e => e.Stage == "model_failed").Message.Contains("HTTP 401: invalid_request_error\n完整错误第二行")
+            Expect(retained.Any(e => e.Stage == "executed") && retained.Single(e => e.Stage == "model_failed").Message.Contains("HTTP 401: invalid_request_error\n完整错误第二行")
                 && retained.All(e => e.Level == "error"), "warning/error filtering retains complete log entries");
             long logBytes = Directory.GetFiles(Path.Combine(root, "logs")).Sum(p => new FileInfo(p).Length);
             Click(window, "清空 Agent 行动");
-            Check(!logs.ItemsSource!.Cast<AgentEvent>().Any() && Directory.GetFiles(Path.Combine(root, "logs")).Sum(p => new FileInfo(p).Length) == logBytes, "clearing the log view does not delete persisted diagnostics");
-            Check(!typeof(SettingsWindow).Assembly.GetReferencedAssemblies().Any(a => a.Name == "System.Windows.Forms"), "Settings no longer depends on WinForms");
+            Expect(!logs.ItemsSource!.Cast<AgentEvent>().Any() && Directory.GetFiles(Path.Combine(root, "logs")).Sum(p => new FileInfo(p).Length) == logBytes, "clearing the log view does not delete persisted diagnostics");
+            Expect(!typeof(SettingsWindow).Assembly.GetReferencedAssemblies().Any(a => a.Name == "System.Windows.Forms"), "Settings no longer depends on WinForms");
             window.Close();
-            Check(window.IsClosed, "closing the window exits the standalone settings app");
+            Expect(window.IsClosed, "closing the window exits the standalone settings app");
             var restored = new SettingsWindow(new HttpClient(new HostFixture()) { BaseAddress = new Uri("http://fixture") }, initializeOnOpen: false);
             restored.Show();
             restored.Exit();
-            Check(restored.IsClosed, "explicit exit really closes a restored window");
+            Expect(restored.IsClosed, "explicit exit really closes a restored window");
         }
         finally
         {

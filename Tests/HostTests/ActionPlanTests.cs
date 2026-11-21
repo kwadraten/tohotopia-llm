@@ -9,7 +9,7 @@ public class ActionPlanTests
     public async Task Ordered_action_plans_and_validation()
     {
         string prior = Files.Root;
-        string root = Path.Combine(Path.GetTempPath(), "tohotopia-plan-check-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(Path.GetTempPath(), "tohotopia-plan-test-" + Guid.NewGuid().ToString("N"));
         Files.Root = root;
         Directory.CreateDirectory(root);
         try

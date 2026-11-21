@@ -1,1 +1,1 @@
-[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("LoaderChecks")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("ModTests")]

@@ -9,7 +9,7 @@ using TohotopiaShared;
 
 // Exercise the SDK inside the real host, including its NativeAOT executable.
 // Everything remains on loopback, with an isolated catalog and dummy API key.
-static class NativeSdkChecks
+static class NativeSdkFlow
 {
     internal static async Task Run(HttpClient host, string root)
     {

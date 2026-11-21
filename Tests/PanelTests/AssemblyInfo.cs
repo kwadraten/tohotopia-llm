@@ -1,5 +1,5 @@
 using Xunit;
 
 // One headless UI thread, shared Files.Root and mutable test windows: run all
-// checks sequentially.
+// tests sequentially.
 [assembly: CollectionBehavior(DisableTestParallelization = true)]

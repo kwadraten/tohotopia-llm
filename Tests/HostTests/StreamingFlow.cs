@@ -5,7 +5,7 @@ using System.Text.Json.Serialization.Metadata;
 using Microsoft.Extensions.AI;
 using Tohotopia;
 
-internal static class StreamingChecks
+internal static class StreamingFlow
 {
     internal static async Task Run(string provider, OAuth oauth)
     {

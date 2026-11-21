@@ -3,7 +3,7 @@ using System.Text;
 using System.Security.Cryptography;
 using Xunit;
 
-static class LifecycleChecks
+static class LifecycleFlow
 {
     internal static async Task Run(string executable, bool throughShortcut = false)
     {

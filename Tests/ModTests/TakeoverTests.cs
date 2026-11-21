@@ -4,5 +4,5 @@ using Xunit;
 public class TakeoverTests
 {
     [Fact]
-    public void Model_takeover_lifecycle() => TakeoverChecks.Run(Assert.True);
+    public void Model_takeover_lifecycle() => TakeoverFlow.Run(Assert.True);
 }

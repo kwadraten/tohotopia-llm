@@ -7,7 +7,7 @@ public class PackageLayoutTests
     [Fact]
     public void Workshop_package_lifecycle_and_data_migration()
     {
-        string root = Path.Combine(Path.GetTempPath(), "llm-workshop-check-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(Path.GetTempPath(), "llm-workshop-test-" + Guid.NewGuid().ToString("N"));
         string old = Path.Combine(root, "Mods", "LLMBattle"), workshop = Path.Combine(root, "workshop", "1234567890");
         string data = Path.Combine(root, "user-data"), legacy = Path.Combine(root, "legacy", "runtime");
         Directory.CreateDirectory(old); Directory.CreateDirectory(workshop); Directory.CreateDirectory(legacy);

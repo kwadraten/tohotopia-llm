@@ -12,8 +12,8 @@ public class LifecycleTests
     }
 
     [Fact]
-    public Task Panel_lifecycle() => LifecycleChecks.Run(Executable());
+    public Task Panel_lifecycle() => LifecycleFlow.Run(Executable());
 
     [Fact]
-    public Task Panel_lifecycle_through_desktop_shortcut() => LifecycleChecks.Run(Executable(), throughShortcut: true);
+    public Task Panel_lifecycle_through_desktop_shortcut() => LifecycleFlow.Run(Executable(), throughShortcut: true);
 }

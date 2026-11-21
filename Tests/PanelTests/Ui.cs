@@ -39,7 +39,7 @@ static class Ui
         await done.Task;
     }
 
-    internal static void Check(bool condition, string text) => Assert.True(condition, text);
+    internal static void Expect(bool condition, string text) => Assert.True(condition, text);
 
     internal static IEnumerable<Control> Controls(Control control)
     {
@@ -69,6 +69,6 @@ static class Ui
     internal static async Task Until(Func<bool> condition)
     {
         for (int i = 0; i < 100 && !condition(); i++) await Task.Delay(10);
-        Check(condition(), "asynchronous UI operation completes");
+        Expect(condition(), "asynchronous UI operation completes");
     }
 }

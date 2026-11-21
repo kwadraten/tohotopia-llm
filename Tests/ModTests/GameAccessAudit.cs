@@ -35,32 +35,32 @@ static class GameAccessAudit
             return true;
         return new[] { "GetField", "GetFields", "GetMethod", "GetMethods", "GetProperty", "GetProperties", "GetInterfaces", "GetType", "StaticProperty", "Localized", "Scalar", "FieldString", "ReadBool", "ReadInt", "ReadUInt", "FieldIds", "EnumText", "LocalizedOrUnknown", "ContentDefinition", "AddVariants", "Aliases" }.Contains(name);
     }
-    internal static void Run(string dll, string root, Action<bool, string> check)
+    internal static void Run(string dll, string root, Action<bool, string> expect)
     {
         var sites = Sites(root);
         var accesses = JsonSerializer.Deserialize<Access[]>(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "GameAccesses.json")));
         var declared = accesses.Select(a => a.Site).ToHashSet();
         var missing = sites.Where(s => !declared.Contains(s.Key)).Select(s => $"{s.File}:{s.Line} {s.Expression}").ToArray();
         var stale = declared.Except(sites.Select(s => s.Key)).ToArray();
-        check(missing.Length == 0 && stale.Length == 0, "every reflection access site and dynamic helper expansion is explicitly audited" + Errors(missing.Concat(stale)));
-        check(accesses.Where(a => a.Kind == "externalContract").All(a =>
+        expect(missing.Length == 0 && stale.Length == 0, "every reflection access site and dynamic helper expansion is explicitly audited" + Errors(missing.Concat(stale)));
+        expect(accesses.Where(a => a.Kind == "externalContract").All(a =>
             a.Type == "UnityEngine.Application" && a.Member == "get_isBatchMode" && a.Arguments == 0
             || a.Type == "UnityEngine.Object" && a.Member == "FindObjectOfType" && a.Arguments == 1),
             "only the unused Unity batch-mode and object-finder helpers rely on API contracts absent from Hotfix member references");
         using var game = new Model(dll);
         var errors = accesses.Where(a => a.Kind is not ("helper" or "externalContract")).Select(a => (a, error: game.Verify(a))).Where(x => x.error != null)
             .Select(x => $"{sites.First(s => s.Key == x.a.Site).File}:{sites.First(s => s.Key == x.a.Site).Line} {x.a.Type}.{x.a.Member}: {x.error}").Distinct().ToArray();
-        check(errors.Length == 0, "reflection receivers, inherited members, getter properties, arity, staticness and value conversions match the installed game" + Errors(errors));
-        check(game.Verify(new("", "RuntimeData.MapData", "field", "Id", 0, "uint")) != null
+        expect(errors.Length == 0, "reflection receivers, inherited members, getter properties, arity, staticness and value conversions match the installed game" + Errors(errors));
+        expect(game.Verify(new("", "RuntimeData.MapData", "field", "Id", 0, "uint")) != null
             && game.Verify(new("", "RuntimeData.MapData", "field", "MapID", 0, "uint")) == null,
             "MapData.MapID is a numeric field and MapData.Id is rejected even when other game types declare Id");
-        check(game.Verify(new("", "TH1_Logic.Steam.GameNetSender", "static", "Instance", 0, "object")) != null
+        expect(game.Verify(new("", "TH1_Logic.Steam.GameNetSender", "static", "Instance", 0, "object")) != null
             && game.Verify(new("", "TH1_Logic.Steam.GameNetSender", "static", "<Instance>k__BackingField", 0, "object")) == null,
             "static auto-properties must be read through their backing fields rather than treated as fields");
-        check(game.Verify(new("", "RuntimeData.MapData", "field", "MapConfig", 0, "uint")) != null
+        expect(game.Verify(new("", "RuntimeData.MapData", "field", "MapConfig", 0, "uint")) != null
             && game.Verify(new("", "Logic.Action.CommonActionId", "field", "ActionType", 0, "int")) == null,
             "boxed structures and numeric enum conversions are valid but reference objects cannot be read as integers");
-        check(new[] { "ActionInfo", "TechInfo", "TechAtomInfo", "SkillInfo", "UnitTypeInfo" }
+        expect(new[] { "ActionInfo", "TechInfo", "TechAtomInfo", "SkillInfo", "UnitTypeInfo" }
             .All(t => game.Verify(new("", t, "field", "Retired", 0, "byte")) == null)
             && new[] { "TerrainInfo", "ResourceInfo", "TH1_Logic.MatchConfig.WikiItem", "NaturalWonderInfo", "TH1_Data.GridContentDefinition", "HeroInfoData" }
             .All(t => game.Verify(new("", t, "field", "Retired", 0, "byte")) != null),

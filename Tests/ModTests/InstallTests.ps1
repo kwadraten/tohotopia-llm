@@ -1,7 +1,7 @@
 param([string]$LoaderDll = 'C:\Program Files (x86)\Steam\steamapps\workshop\content\3774440\3829555573\0.8.5d\TH1.Hotfix.dll')
 $ErrorActionPreference = 'Stop'
-$repo = Split-Path $PSScriptRoot
-$testRoot = Join-Path $repo ('work\loader-install-check-' + [Guid]::NewGuid().ToString('N'))
+$repo = Split-Path (Split-Path $PSScriptRoot)
+$testRoot = Join-Path $repo ('work\loader-install-Expect-' + [Guid]::NewGuid().ToString('N'))
 $game = Join-Path $testRoot 'game'
 $mods = Join-Path $testRoot 'Mods'
 $legacy = Join-Path $game 'BepInEx\plugins\LLMBattle'

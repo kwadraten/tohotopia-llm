@@ -46,7 +46,7 @@ public class SubscriptionToolTests
 
                 var transport = new ToolWireTransport(provider);
                 var oauth = new OAuth(new HttpClient(new NoOAuthRequestHandler()));
-                await StreamingChecks.Run(provider, oauth);
+                await StreamingFlow.Run(provider, oauth);
                 using var client = new SubscriptionClient(new AgentConfig { Provider = provider, Model = "fixture-model", Reasoning = "none" }, oauth, new HttpClient(transport));
                 var localTool = AIFunctionFactory.Create((string query) => "本地规则结果:" + query, "search_game_rules", "仅查询本地规则资料。", Files.Json);
                 var agent = new ChatClientAgent(client, name: "ToolFixture", tools: new AITool[] { localTool });

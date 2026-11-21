@@ -26,7 +26,7 @@ public class CommunicationTests
             "live visibility tool rejects another player, another match and stale snapshots");
 
         string prior = Files.Root;
-        string root = Path.Combine(Path.GetTempPath(), "tohotopia-communication-check-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(Path.GetTempPath(), "tohotopia-communication-test-" + Guid.NewGuid().ToString("N"));
         Files.Root = root;
         Directory.CreateDirectory(root);
         try

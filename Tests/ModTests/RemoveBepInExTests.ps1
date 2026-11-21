@@ -1,10 +1,10 @@
 $ErrorActionPreference = 'Stop'
-$repo = Split-Path $PSScriptRoot
+$repo = Split-Path (Split-Path $PSScriptRoot)
 $script = Join-Path $repo 'Remove-BepInEx.ps1'
-$root = Join-Path $repo ('work\remove-bepinex-check-' + [Guid]::NewGuid().ToString('N'))
+$root = Join-Path $repo ('work\remove-bepinex-Expect-' + [Guid]::NewGuid().ToString('N'))
 $data = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'TohotopiaLLM\runtime'
-$marker = 'remove-bepinex-check-' + [Guid]::NewGuid().ToString('N') + '.json'
-function Check([bool]$Value, [string]$Message) { if (-not $Value) { throw $Message }; Write-Output "PASS $Message" }
+$marker = 'remove-bepinex-Expect-' + [Guid]::NewGuid().ToString('N') + '.json'
+function Expect([bool]$Value, [string]$Message) { if (-not $Value) { throw $Message }; Write-Output "PASS $Message" }
 function Invoke-Script([string[]]$Arguments) {
     $ErrorActionPreference = 'Continue'
     (& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script @Arguments 2>&1 | ForEach-Object { "$_" }) -join "`n"
@@ -41,38 +41,38 @@ try {
     $game = New-Game 'game'
     New-Item -ItemType Directory -Path (Join-Path $game 'BepInEx\plugins\OtherPlugin') -Force | Out-Null
     $output = Invoke-Script @('-GameRoot', $game)
-    Check ($output -match 'OtherPlugin' -and (Test-Path -LiteralPath (Join-Path $game 'BepInEx'))) 'other BepInEx plugins block removal until -Force'
+    Expect ($output -match 'OtherPlugin' -and (Test-Path -LiteralPath (Join-Path $game 'BepInEx'))) 'other BepInEx plugins block removal until -Force'
 
     $output = Invoke-Script @('-GameRoot', $game, '-Force', '-WhatIf')
-    Check ((Test-Path -LiteralPath (Join-Path $game 'BepInEx')) -and -not (Test-Path -LiteralPath (Join-Path $data $marker))) '-WhatIf changes neither the game folder nor user data'
+    Expect ((Test-Path -LiteralPath (Join-Path $game 'BepInEx')) -and -not (Test-Path -LiteralPath (Join-Path $data $marker))) '-WhatIf changes neither the game folder nor user data'
 
     $backup = Join-Path $root 'backup'
     $output = Invoke-Script @('-GameRoot', $game, '-Force', '-BackupRoot', $backup)
     $left = @(Get-ChildItem -LiteralPath $game -Force | ForEach-Object Name | Sort-Object)
-    Check (($left -join ',') -eq 'GameAssembly.dll,TOHOTOPIA.exe') 'BepInEx, Doorstop proxy and config, bundled runtime and changelog are removed; game files stay'
-    Check ((Get-ChildItem -LiteralPath $backup -Directory | Select-Object -First 1 | Get-ChildItem -Force).Count -eq 6) '-BackupRoot moves every removed item to a timestamped backup'
-    Check (Test-Path -LiteralPath (Join-Path $data $marker)) 'LLM Battle runtime data from the plugin folder is preserved in LocalAppData'
+    Expect (($left -join ',') -eq 'GameAssembly.dll,TOHOTOPIA.exe') 'BepInEx, Doorstop proxy and config, bundled runtime and changelog are removed; game files stay'
+    Expect ((Get-ChildItem -LiteralPath $backup -Directory | Select-Object -First 1 | Get-ChildItem -Force).Count -eq 6) '-BackupRoot moves every removed item to a timestamped backup'
+    Expect (Test-Path -LiteralPath (Join-Path $data $marker)) 'LLM Battle runtime data from the plugin folder is preserved in LocalAppData'
 
     $output = Invoke-Script @('-GameRoot', $game)
-    Check ($output -match 'Nothing to do') 'running again on a clean game folder is a no-op'
+    Expect ($output -match 'Nothing to do') 'running again on a clean game folder is a no-op'
 
     $other = New-Game 'foreign-proxy' 'Some other proxy'
     $output = Invoke-Script @('-GameRoot', $other, '-Force')
-    Check ((Test-Path -LiteralPath (Join-Path $other 'winhttp.dll')) -and -not (Test-Path -LiteralPath (Join-Path $other 'BepInEx'))) 'a winhttp.dll that is not Doorstop is kept'
+    Expect ((Test-Path -LiteralPath (Join-Path $other 'winhttp.dll')) -and -not (Test-Path -LiteralPath (Join-Path $other 'BepInEx'))) 'a winhttp.dll that is not Doorstop is kept'
 
     $output = Invoke-Script @('-GameRoot', (Join-Path $root 'missing'))
-    Check ($output -match 'TOHOTOPIA.exe missing') 'a folder without TOHOTOPIA.exe is rejected'
+    Expect ($output -match 'TOHOTOPIA.exe missing') 'a folder without TOHOTOPIA.exe is rejected'
 
     $solo = New-Game 'only-llmbattle'
     $output = Invoke-Script @('-GameRoot', $solo)
-    Check (-not (Test-Path -LiteralPath (Join-Path $solo 'BepInEx'))) 'an install whose only plugin is LLM Battle needs no -Force'
+    Expect (-not (Test-Path -LiteralPath (Join-Path $solo 'BepInEx'))) 'an install whose only plugin is LLM Battle needs no -Force'
 
     $inside = New-Game 'backup-inside'
     $output = Invoke-Script @('-GameRoot', $inside, '-BackupRoot', $inside)
-    Check ($output -match 'outside the game folder' -and (Test-Path -LiteralPath (Join-Path $inside 'BepInEx'))) 'backups inside the game folder are refused before anything is removed'
+    Expect ($output -match 'outside the game folder' -and (Test-Path -LiteralPath (Join-Path $inside 'BepInEx'))) 'backups inside the game folder are refused before anything is removed'
     Remove-Item -LiteralPath (Join-Path $data $marker)
     $output = Invoke-Script @('-GameRoot', $inside, '-BackupRoot', $inside)
-    Check (-not (Test-Path -LiteralPath (Join-Path $data $marker))) 'a refused run does not touch user data'
+    Expect (-not (Test-Path -LiteralPath (Join-Path $data $marker))) 'a refused run does not touch user data'
 }
 finally {
     Remove-Item -LiteralPath (Join-Path $data $marker) -ErrorAction SilentlyContinue

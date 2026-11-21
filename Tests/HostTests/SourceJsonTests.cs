@@ -17,7 +17,7 @@ public class SourceJsonTests
         // TOHOTOPIA_NATIVE_HOST may point at a published AgentHost.exe; without
         // it the managed assembly is hosted through dotnet exec instead.
         string? nativeHost = Environment.GetEnvironmentVariable("TOHOTOPIA_NATIVE_HOST");
-        Assert.True(!JsonSerializer.IsReflectionEnabledByDefault, "JSON checks run with reflection serialization disabled");
+        Assert.True(!JsonSerializer.IsReflectionEnabledByDefault, "JSON tests run with reflection serialization disabled");
         string previousRoot = Files.Root;
         string root = Path.Combine(Path.GetTempPath(), "tohotopia-source-json-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -179,7 +179,7 @@ public class SourceJsonTests
         using var host = Process.Start(start)!;
         var stdout = host.StandardOutput.ReadToEndAsync();
         var stderr = host.StandardError.ReadToEndAsync();
-        bool checksPassed = false;
+        bool testsPassed = false;
         try
         {
             using var http = new HttpClient { BaseAddress = new Uri("http://127.0.0.1:" + port), Timeout = TimeSpan.FromSeconds(20) };
@@ -209,16 +209,16 @@ public class SourceJsonTests
             using var failure = await http.PostAsJsonAsync("/auth/missing/api-key", new ApiKeyRequest("fixture"), HostJson.Type<ApiKeyRequest>());
             using var problem = JsonDocument.Parse(await failure.Content.ReadAsStringAsync());
             Assert.True(failure.StatusCode == HttpStatusCode.UnprocessableEntity && problem.RootElement.GetProperty("status").GetInt32() == 422, "HTTP errors retain generated ProblemDetails responses");
-            await CredentialEndpointChecks.Run(http, hostRoot);
-            await NativeSdkChecks.Run(http, hostRoot);
-            checksPassed = true;
+            await CredentialEndpointFlow.Run(http, hostRoot);
+            await NativeSdkFlow.Run(http, hostRoot);
+            testsPassed = true;
         }
         finally
         {
             if (!host.HasExited) host.Kill(entireProcessTree: true);
             await host.WaitForExitAsync();
             string output = await stdout + await stderr;
-            if (!checksPassed) throw new Exception("HTTP endpoint checks failed; host output:" + Environment.NewLine + output);
+            if (!testsPassed) throw new Exception("HTTP endpoint tests failed; host output:" + Environment.NewLine + output);
         }
     }
 

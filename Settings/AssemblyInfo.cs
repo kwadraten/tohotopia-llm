@@ -1,2 +1,2 @@
 using System.Runtime.CompilerServices;
-[assembly: InternalsVisibleTo("SettingsChecks")]
+[assembly: InternalsVisibleTo("PanelTests")]

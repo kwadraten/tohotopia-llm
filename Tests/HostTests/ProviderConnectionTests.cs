@@ -10,7 +10,7 @@ public class ProviderConnectionTests
     public async Task Provider_auth_methods_and_native_transport()
     {
         string previousRoot = Files.Root;
-        string root = Path.Combine(Path.GetTempPath(), "tohotopia-provider-check-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(Path.GetTempPath(), "tohotopia-provider-test-" + Guid.NewGuid().ToString("N"));
         Files.Root = root;
         Directory.CreateDirectory(root);
         try
