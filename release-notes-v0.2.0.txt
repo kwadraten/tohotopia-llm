@@ -1,0 +1,40 @@
+Tohotopia LLM AI v0.2.0
+========================
+
+Steam Workshop item: 3843427412 ("LLM AI in Tohotopia")
+Requires: TOHOTOPIA game 0.8.5d, TH1 Mod Loader 0.8.031+
+  https://steamcommunity.com/sharedfiles/filedetails/?id=3829555573
+
+This is the first Workshop release and a full rework of the mod:
+
+* Moved from BepInEx to the TH1 code mod loader; the mod now runs fully
+  headless with no BepInEx/Unity dependencies.
+* AgentHost is a standalone NativeAOT local service; no .NET install needed.
+* The settings app is a standalone Avalonia control panel
+  (TH1LLMBattlePanel.exe). The tray mode was removed: closing the window
+  exits the panel, and first launch creates a "TOHOTOPIA LLM AI 控制面板"
+  desktop shortcut automatically.
+* Model takeover works in normal Steam lobbies via native AI seats
+  (up to 4 seats, per-seat provider/model/reasoning).
+* Per-match state isolation, ordered action plans, ally/team chat
+  communication and out-of-turn coordination.
+* Settings, credentials and logs live in %LOCALAPPDATA%\TohotopiaLLM
+  (DPAPI-protected), separate from the Workshop package; first start
+  migrates legacy BepInEx runtime data.
+
+Package
+-------
+tohotopia-llm-v0.2.0.zip   34,257,119 bytes
+SHA-256: b70a520f60649fda087d70517359350d9eeb22b91ddb88d478e28d32d55de5df
+
+Contents: LLMBattle/ content folder (mod.dll, mod_info.json, package.build,
+NativeAOT AgentHost.exe and TH1LLMBattlePanel.exe, settings.example.json,
+Remove-BepInEx script, preview.png, license texts).
+
+Subscribe via Steam Workshop, or unpack the LLMBattle folder into the game's
+Mods directory for local development installs (Install.ps1 -GameRoot).
+Remove-BepInEx.bat inside the package cleans up legacy BepInEx installs.
+
+Verification: all three test suites pass (LoaderChecks, Checks, SettingsChecks
+on xUnit v3 / Microsoft.Testing.Platform; environment-gated audits skipped
+without a game install).
