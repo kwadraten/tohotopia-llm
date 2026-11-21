@@ -11,7 +11,7 @@
 1. 订阅本 mod，在 TH1ModManager 中启用 LLM Battle
 2. 手动启动「TOHOTOPIA大模型AI控制面板」：面板首次运行会自动在桌面创建快捷方式；
    找不到快捷方式时，在工坊内容目录中运行 Settings\TH1LLMBattlePanel.exe，例如
-   steamapps\workshop\content\3774440\<本物品ID>\Settings\TH1LLMBattlePanel.exe
+   steamapps\workshop\content\3774440\3843427412\Settings\TH1LLMBattlePanel.exe
    （「管理→浏览本地文件」可直达工坊目录；也可在开始菜单搜索 TH1LLMBattlePanel）
 3. 在面板「账号管理」中添加模型订阅或 API Key，在「AI 接管」中为每个席位选择模型并保存接管配置
 4. 由房主创建普通 Steam 联机房间，设置足够数量的原生 AI 席位并开始对局；
