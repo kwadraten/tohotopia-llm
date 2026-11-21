@@ -43,6 +43,6 @@ dotnet run --project .\LoaderChecks -c Release -- "加载器目录\0.8.5d\TH1.Ho
 .\LoaderChecks\RemoveBepInExChecks.ps1
 ```
 
-将 `dist\LLMBattle` 原样作为工坊上传的 contentfolder，不要混入本机 runtime 数据。发布条目时，将加载器 `3829555573` 设置为 Steam 工坊必需物品。`package.build` 与入口程序集一起生成，用于定位当前加载版本的文件；不要手工替换单独的 DLL。启用顺序由加载器管理，程序更新由 Steam 负责。
+将 `dist\LLMBattle` 原样作为工坊上传的 contentfolder，不要混入本机 runtime 数据。仓库根目录的 `workshop_build.vdf` 已指向该目录与 `preview.png`，可用 steamcmd 执行 `steamcmd +login <用户> +workshop_build_item workshop_build.vdf +quit` 创建/更新条目；条目页中的说明文本粘贴自 `workshop-description.txt`。发布条目时，将加载器 `3829555573` 设置为 Steam 工坊必需物品。`package.build` 与入口程序集一起生成，用于定位当前加载版本的文件；不要手工替换单独的 DLL。启用顺序由加载器管理，程序更新由 Steam 负责。
 
 开发时可用 `.\Install.ps1 -GameRoot "游戏目录"` 复制完整发布包到本地 `Mods\LLMBattle`。此脚本只用于本地开发，订阅用户无需运行。不要同时启用旧的本地副本和新的工坊副本。
