@@ -2,7 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+#if TH1_LOADER
+using TohotopiaMod.Json;
+#else
 using System.Text.Json;
+#endif
 namespace TohotopiaShared;
 
 public record PlannedStep(string CandidateId, string Message = "");
@@ -119,16 +123,56 @@ public record VisibleSnapshot(string SessionId, uint MapId, uint PlayerId, DateT
         && CapturedAt <= now.AddSeconds(2) && CapturedAt >= now.AddSeconds(-20);
 }
 public record RoomStatus(string State, string Message, bool Joined = false, bool Started = false, uint MapId = 0, uint HumanPlayerId = 0, int AIPlayers = 0, int NetMode = 0, bool ModelsEnabled = false, bool SpectatorMode = false);
+public static class RuntimePaths
+{
+    public static string DefaultRoot => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "AppData", "LocalLow", "TohotopiaLLM", "runtime");
+    public static string PrepareRoot(string? configuredRoot)
+    {
+        if (configuredRoot is not null)
+        {
+            string root = Path.GetFullPath(configuredRoot);
+            Directory.CreateDirectory(root);
+            return root;
+        }
+        string defaultRoot = DefaultRoot;
+        Directory.CreateDirectory(defaultRoot);
+        MigrateSettings(defaultRoot, Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TohotopiaLLM", "runtime"));
+        return defaultRoot;
+    }
+    internal static void MigrateSettings(string root, string legacyRoot)
+    {
+        if (!Directory.Exists(legacyRoot)) return;
+        foreach (string name in new[] { "settings.json", "room.json", "account-ui.json", "window-ui.json", "models-dev.json" })
+        {
+            string source = Path.Combine(legacyRoot, name), target = Path.Combine(root, name);
+            if (!File.Exists(source) || File.Exists(target)) continue;
+            try { File.Copy(source, target); }
+            catch (IOException) when (File.Exists(target)) { }
+        }
+    }
+}
 public static class RoomFiles
 {
-    public static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, PropertyNameCaseInsensitive = true, WriteIndented = true };
+    public static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, PropertyNameCaseInsensitive = true, WriteIndented = true,
+#if AGENT_HOST
+        TypeInfoResolver = Tohotopia.HostJsonContext.Default
+#elif SETTINGS_APP
+        TypeInfoResolver = Settings.SettingsJsonContext.Default
+#endif
+    };
     public static T? Read<T>(string root, string name) where T : class
     {
         string p = Path.Combine(root, name);
         if (!File.Exists(p))
             return null;
         using var stream = new FileStream(p, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+#if AGENT_HOST
+        return JsonSerializer.Deserialize(stream, Tohotopia.HostJson.Type<T>(Json));
+#elif SETTINGS_APP
+        return JsonSerializer.Deserialize(stream, Settings.SettingsJson.Type<T>(Json));
+#else
         return JsonSerializer.Deserialize<T>(stream, Json);
+#endif
     }
     public static void Write<T>(string root, string name, T value)
     {
@@ -137,7 +181,13 @@ public static class RoomFiles
         string tmp = p + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
+#if AGENT_HOST
+            File.WriteAllText(tmp, JsonSerializer.Serialize(value, Tohotopia.HostJson.Type<T>(Json)));
+#elif SETTINGS_APP
+            File.WriteAllText(tmp, JsonSerializer.Serialize(value, Settings.SettingsJson.Type<T>(Json)));
+#else
             File.WriteAllText(tmp, JsonSerializer.Serialize(value, Json));
+#endif
             // Move(overwrite: true) cannot replace an open destination on Windows,
             // even when its readers allow FileShare.Delete. Replace can.
             if (File.Exists(p)) File.Replace(tmp, p, null);
