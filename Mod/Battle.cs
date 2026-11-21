@@ -5,41 +5,24 @@ using System.Collections.Generic;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
-using System.Text.Json;
+using TohotopiaMod.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Diagnostics;
-using BepInEx;
-using BepInEx.Unity.IL2CPP;
-using BepInEx.Logging;
-using UnityEngine;
-using UnityEngine.UI;
-using TMPro;
-using Il2CppInterop.Runtime.Attributes;
-using R = IL2CppSharp.Il2CppReflection;
+using R = TohotopiaMod.GameReflection;
 using N = TohotopiaMod.Native;
 using TohotopiaShared;
 namespace TohotopiaMod;
 
-[BepInPlugin("local.tohotopia.llm.battle", "LLM Battle", "0.1.0")]
-public class BattlePlugin : BasePlugin
+public partial class Battle
 {
-    public override void Load()
-    {
-        Battle.Log = Log;
-        Battle.InstallDirectory = Path.GetDirectoryName(GetType().Assembly.Location);
-        AddComponent<Battle>();
-    }
-}
-public partial class Battle : MonoBehaviour
-{
-    public Battle(IntPtr p) : base(p) { }
-    public static ManualLogSource Log;
-    public static string InstallDirectory;
-    string data; HttpClient http; bool ready, enabled, awaitingNewMatch, oldEditor, oldGo, menuAdded; IntPtr previousMap, menu, currentPlayer, currentAI;
+    internal static ModLog Log = new();
+    public static string InstallDirectory = "";
+    internal static string DataDirectory = "";
+    string data; HttpClient http; bool ready, enabled, oldEditor, oldGo, nativeDirty; object previousMap, currentPlayer, currentAI;
     uint playerId, turn, eventMapId; int sequence; string requestId, status = "尚未启用 LLM 对战"; Task<string> pending; CancellationTokenSource cancellation;
     Dictionary<string, int> terrainNames, terrainFeatureNames, vegetationNames, resourceNames, techNames, actionPointNames;
-    Dictionary<string, IntPtr> actions = new(); Dictionary<string, string> actionDescriptions = new(); List<uint> handles = new(); float next; RoomBridge room;
+    Dictionary<string, object> actions = new(); Dictionary<string, string> actionDescriptions = new(); float next; RoomBridge room;
     readonly ActionPlan plan = new();
     string feedback = "";
     readonly HashSet<string> chatCandidates = new();
@@ -50,40 +33,26 @@ public partial class Battle : MonoBehaviour
     readonly Dictionary<string, string> unitNameCache = new();
     JsonSerializerOptions json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     readonly SettingsLauncher settingsLauncher = new();
-    internal void SettingsPoll(bool lobbyOpen) => settingsLauncher.Poll(lobbyOpen);
     public void LateUpdate()
     {
         if (ready) room?.PollTurnName(turnFallback);
     }
     public void Update()
     {
-        if (Input.GetKeyDown(KeyCode.F8))
+        if (GameRuntime.SettingsKeyDown())
             settingsLauncher.Open();
         bool processingModelTurn = false;
         try
         {
-            // Check the authoritative current player every frame, before the
-            // slower request loop, so native fallback cannot spill into AI 2.
-            if (enabled && !awaitingNewMatch)
-            {
-                var activeMap = N.Static("TH1_Logic.Core.Main", "MapData");
-                if (activeMap != IntPtr.Zero && activeMap == previousMap)
-                {
-                    var activePlayer = N.Call(activeMap, "get_ivn");
-                    Pause(activePlayer != IntPtr.Zero && room.Seat(N.Id(activePlayer)) > 0
-                        && !turnFallback.IsNative(N.Id(activePlayer), N.Get<uint>(activePlayer, "Turn")));
-                }
-            }
-            if (Time.realtimeSinceStartup < next)
+            if (enabled) SynchronizeTurn(true);
+            if ((float)GameRuntime.Now < next)
                 return;
-            next = Time.realtimeSinceStartup + 0.15f;
+            next = (float)GameRuntime.Now + 0.15f;
             if (!ready)
             {
-                R.RefreshImageCache();
-                R.AddAssemblyHint("TH1.Hotfix");
-                if (R.FindClass("TH1_Logic.Core.Main") == IntPtr.Zero)
+                if (R.FindClass("TH1_Logic.Core.Main") == null)
                     return;
-                data = Path.Combine(InstallDirectory, "runtime");
+                data = DataDirectory;
                 Directory.CreateDirectory(data);
                 http = new HttpClient() { BaseAddress = new Uri("http://127.0.0.1:17861"), Timeout = TimeSpan.FromSeconds(620) };
                 terrainNames = N.EnumValues("TerrainType");
@@ -96,6 +65,7 @@ public partial class Battle : MonoBehaviour
                 ready = true;
             }
             room.Poll();
+            if (enabled) SynchronizeTurn();
             if (GameRules.ExportStep(data, 8) && !rulesExported)
             {
                 rulesExported = true;
@@ -116,10 +86,10 @@ public partial class Battle : MonoBehaviour
                 if (!enabled)
                 {
                     var previewMap = N.Static("TH1_Logic.Core.Main", "MapData");
-                    if (previewMap != IntPtr.Zero)
+                    if (previewMap != null)
                     {
                         var previewPlayer = N.Call(previewMap, "get_ivn");
-                        if (previewPlayer != IntPtr.Zero)
+                        if (previewPlayer != null)
                             Request(previewMap, previewPlayer, false);
                     }
                 }
@@ -127,43 +97,14 @@ public partial class Battle : MonoBehaviour
             if (!enabled)
                 return;
             var map = N.Static("TH1_Logic.Core.Main", "MapData");
-            if (map == IntPtr.Zero)
-                return;
-            if (awaitingNewMatch)
-            {
-                if (map == previousMap)
-                    return;
-                awaitingNewMatch = false;
-                previousMap = map;
-                sequence = 0;
-                Pause(true);
-            }
-            if (previousMap != map)
-            {
-                Stop("对局已切换，LLM 已停止");
-                return;
-            }
-            PollAmbient(map);
+            if (map == null || previousMap != map) return;
             var main = N.Static("TH1_Logic.Core.Main", "<Instance>k__BackingField");
-            var ai = N.Get<IntPtr>(N.Get<IntPtr>(main, "GameLogic"), "_aiLogic");
-            var player = N.Get<IntPtr>(ai, "_playerData");
-            if (player == IntPtr.Zero || N.Get<int>(player, "PlayerFactionType") != 0 || room.Seat(N.Id(player)) == 0)
-            {
-                if (plan.Active || pending != null) Cancel();
-                return;
-            }
-            uint pid = N.Id(player), pt = N.Get<uint>(player, "Turn");
-            if (pid != playerId || pt != turn)
-            {
-                Cancel();
-                playerId = pid;
-                turn = pt;
-                sequence = 0;
-                chatsThisTurn = 0;
-                Event("turn_start", "开始 AI 回合");
-            }
-            currentPlayer = player;
-            currentAI = ai;
+            if (!ExecutionReady(main, map)) return;
+            PollAmbient(map);
+            var ai = currentAI;
+            var player = currentPlayer;
+            if (!pauseHeld || !CurrentTurn()) return;
+            uint pid = playerId, pt = turn;
             processingModelTurn = true;
             if (turnFallback.IsNative(pid, pt))
                 return;
@@ -252,8 +193,8 @@ public partial class Battle : MonoBehaviour
     {
         Stop("");
         previousMap = N.Static("TH1_Logic.Core.Main", "MapData");
-        eventMapId = previousMap != IntPtr.Zero ? N.Get<uint>(previousMap, "MapID") : 0;
-        awaitingNewMatch = false;
+        if (previousMap == null) throw new InvalidOperationException("当前没有可接管的对局");
+        eventMapId = previousMap != null ? N.Get<uint>(previousMap, "MapID") : 0;
         enabled = true;
         sequence = 0;
         chatsThisTurn = 0;
@@ -261,11 +202,64 @@ public partial class Battle : MonoBehaviour
         turn = 0;
         requestId = "";
         ResetAmbient();
-        Pause(true);
+        SynchronizeTurn();
         Log.LogInfo("Model control enabled");
         Event("control_enabled", "模型接管已启用；只有执行日志能证明已行动");
     }
     internal void StopModels() => Stop("原 AI 已恢复");
+    void SynchronizeTurn(bool advanceDelay = false)
+    {
+        var map = N.Static("TH1_Logic.Core.Main", "MapData");
+        var main = N.Static("TH1_Logic.Core.Main", "<Instance>k__BackingField");
+        var ai = N.Get<object>(N.Get<object>(main, "GameLogic"), "_aiLogic");
+        var player = map == null ? null : N.Call(map, "get_ivn");
+        if (map != previousMap) CancelAmbient();
+        if (player != null && ambientPlayer == N.Id(player)) CancelAmbient();
+        bool controlled = map == previousMap && player != null && N.Get<int>(player, "PlayerFactionType") == 0 && room.Seat(N.Id(player)) > 0;
+        if (TrackTurn(map, ai, controlled ? player : null))
+            Event("turn_start", "开始 AI 回合");
+        bool fallback = currentPlayer != null && turnFallback.IsNative(playerId, turn);
+        Pause(ModelTakeover.Holds(controlled, fallback, currentAI != null, N.Get<int>(currentAI, "AILogicState")));
+        if (advanceDelay && pauseHeld) AdvanceActionDelay(main, map);
+    }
+    internal bool TrackTurn(object map, object ai, object player)
+    {
+        if (map != previousMap) player = null;
+        uint pid = player == null ? 0 : N.Id(player), pt = N.Get<uint>(player, "Turn");
+        bool matches = ModelTakeover.Matches(ai, map, player);
+        bool changed = currentPlayer != player || playerId != pid || turn != pt || map != previousMap
+            || currentAI != null && (currentAI != ai || !matches);
+        if (changed)
+        {
+            Cancel();
+            nativeDirty = false;
+            sequence = chatsThisTurn = 0;
+        }
+        currentPlayer = player;
+        currentAI = matches ? ai : null;
+        playerId = pid;
+        turn = pt;
+        return changed && player != null;
+    }
+    internal bool CurrentTurn() => currentAI != null && currentPlayer != null
+        && N.Static("TH1_Logic.Core.Main", "MapData") == previousMap
+        && N.Call(previousMap, "get_ivn") == currentPlayer
+        && N.Get<uint>(currentPlayer, "Turn") == turn && N.Id(currentPlayer) == playerId
+        && N.Get<object>(N.Get<object>(N.Static("TH1_Logic.Core.Main", "<Instance>k__BackingField"), "GameLogic"), "_aiLogic") == currentAI
+        && ModelTakeover.Matches(currentAI, previousMap, currentPlayer);
+    internal bool ExecutionReady(object main, object map)
+    {
+        var editor = N.Static("Logic.MainEditor", "Instance");
+        bool editorPaused = pauseHeld ? oldEditor && !oldGo : N.Get<bool>(editor, "IsEditor") && !N.Get<bool>(editor, "IsGo");
+        if (map == null || main == null || editorPaused || GameRuntime.TimeScale <= 0 || !N.Get<bool>(main, "_isStarted")
+            || N.Get<object>(main, "_mapStartChoice") != null || N.Get<bool>(main, "IsNetActionExecuting")
+            || !ModelTakeover.Running(N.Value<int>(N.Get<object>(main, "GameLogic"), "gtw"))) return false;
+        if ((bool)R.InvokeStaticMethod(R.FindMethod("TH1_Logic.Net.MultiplayerMatchLoading", "get_wmw", 0), Array.Empty<object>())
+            || (bool)R.InvokeStaticMethod(R.FindMethod("Logic.Action.ActionExecutionSafety", "rpf", 1), new[] { map })
+            || (bool)R.InvokeStaticMethod(R.FindMethod("TH1_Core.Managers.PresentationManager", "get_iwf", 0), Array.Empty<object>())
+            || (bool)R.InvokeStaticMethod(R.FindMethod("TH1_Core.Managers.PresentationManager", "get_zfo", 0), Array.Empty<object>())) return false;
+        return true;
+    }
     int MaxDecisions()
     {
         string settings = Path.Combine(data, "settings.json");
@@ -273,8 +267,11 @@ public partial class Battle : MonoBehaviour
         using var c = JsonDocument.Parse(File.ReadAllText(settings));
         return c.RootElement.TryGetProperty("maxDecisionsPerTurn", out var limit) ? limit.GetInt32() : 80;
     }
-    void AdvancePlan(IntPtr ai, uint pid, uint pt)
+    internal void AdvancePlan(object ai, uint pid, uint pt)
     {
+        if (ai != currentAI || pid != playerId || pt != turn || !pauseHeld || !CurrentTurn()
+            || N.Get<int>(ai, "AILogicState") != 1
+            || !ExecutionReady(N.Static("TH1_Logic.Core.Main", "<Instance>k__BackingField"), previousMap)) return;
         var step = plan.Current;
         string selected = step.CandidateId;
         if (ChatActions.Channel(selected) != "")
@@ -309,8 +306,8 @@ public partial class Battle : MonoBehaviour
         }
         else
         {
-            var param = N.Get<IntPtr>(action, "Param");
-            var logic = N.Get<IntPtr>(action, "ActionLogic");
+            var param = N.Get<object>(action, "Param");
+            var logic = N.Get<object>(action, "ActionLogic");
             bool valid;
             try
             {
@@ -330,6 +327,7 @@ public partial class Battle : MonoBehaviour
             int before = N.Get<int>(ai, "_actionCount");
             room.ExecuteModelAction(() =>
             {
+                nativeDirty = true;
                 N.Call(action, "htr");
                 if (N.Get<bool>(action, "IsInSight"))
                     N.Call(logic, "hzo", param);
@@ -340,22 +338,22 @@ public partial class Battle : MonoBehaviour
         }
         sequence++;
         plan.Advance();
-        if (!plan.Active) ReleaseHandles();
+        if (!plan.Active) ClearCandidates();
     }
     void BlockPlan(string selected, string reason)
     {
         feedback = plan.Block(reason.Length <= 500 ? reason : reason[..500]);
         status = feedback;
         Event("plan_blocked", feedback, selected, "warning");
-        ReleaseHandles();
+        ClearCandidates();
         sequence++;
     }
     void Pause(bool on)
     {
-        if (pauseHeld == on)
+        if (!pauseHeld && !on)
             return;
         var editor = N.Static("Logic.MainEditor", "Instance");
-        if (on)
+        if (on && !pauseHeld)
         {
             oldEditor = N.Get<bool>(editor, "IsEditor");
             oldGo = N.Get<bool>(editor, "IsGo");
@@ -363,6 +361,14 @@ public partial class Battle : MonoBehaviour
         N.SetBool(editor, "IsEditor", on || oldEditor);
         N.SetBool(editor, "IsGo", on ? false : oldGo);
         pauseHeld = on;
+    }
+    bool? pauseSkipsDelay;
+    void AdvanceActionDelay(object main, object map)
+    {
+        pauseSkipsDelay ??= ActionDelay.Required(R.RequireClass("Logic.AI.AILogic"));
+        if (pauseSkipsDelay != true) return;
+        if (CurrentTurn() && ExecutionReady(main, map))
+            ActionDelay.Advance(currentAI, false, GameRuntime.DeltaTime);
     }
     void Cancel()
     {
@@ -372,24 +378,22 @@ public partial class Battle : MonoBehaviour
         pending = null;
         plan.Clear();
         feedback = "";
-        ReleaseHandles();
+        ClearCandidates();
     }
-    void ReleaseHandles()
+    void ClearCandidates()
     {
-        foreach (uint h in handles)
-            N.il2cpp_gchandle_free(h);
-        handles.Clear();
         actions.Clear();
         actionDescriptions.Clear();
         chatCandidates.Clear();
     }
     void Stop(string text)
     {
-        if (enabled && !awaitingNewMatch)
-            Pause(false);
+        if (nativeDirty) RestartNativeTurn();
+        Pause(false);
         bool wasEnabled = enabled;
         enabled = false;
-        awaitingNewMatch = false;
+        nativeDirty = false;
+        currentAI = currentPlayer = null;
         ResetAmbient();
         Cancel();
         turnFallback.Clear();
@@ -402,6 +406,7 @@ public partial class Battle : MonoBehaviour
     }
     void FallbackTurn(string reason)
     {
+        if (!CurrentTurn()) { Cancel(); Pause(false); return; }
         turnFallback.Fail(playerId, turn);
         Cancel();
         bool resumed = RestartNativeTurn();
@@ -412,28 +417,12 @@ public partial class Battle : MonoBehaviour
         Log.LogWarning(status);
         Event("seat_fallback", status, level: "warning");
     }
-    bool RestartNativeTurn()
+    internal bool RestartNativeTurn()
     {
-        if (currentAI == IntPtr.Zero || currentPlayer == IntPtr.Zero ||
-            N.Get<IntPtr>(currentAI, "_playerData") != currentPlayer)
-            return false;
-        try
-        {
-            var map = N.Get<IntPtr>(currentAI, "_mapData");
-            var kernel = N.Get<IntPtr>(currentAI, "_kernel");
-            int state = N.Get<int>(currentAI, "AILogicState");
-            if (map == IntPtr.Zero || map != previousMap || kernel == IntPtr.Zero || (state != 1 && state != 2))
-                throw new InvalidOperationException("原生 AI 状态不允许中途恢复");
-            N.Call(kernel, "koq");
-            N.Call(kernel, "koo", map, currentPlayer);
-            return true;
-        }
-        catch (Exception e)
-        {
-            Log.LogError("原生 AI 恢复失败，结束当前回合：" + e.Message);
-            N.SetInt(currentAI, "AILogicState", 4);
-            return false;
-        }
+        if (!CurrentTurn()) return false;
+        bool resumed = ModelTakeover.Restart(currentAI, previousMap, currentPlayer);
+        nativeDirty = false;
+        return resumed;
     }
     public void OnDestroy()
     {
@@ -441,17 +430,17 @@ public partial class Battle : MonoBehaviour
         room?.Dispose();
         http?.Dispose();
     }
-    void Request(IntPtr map, IntPtr player, bool send = true)
+    void Request(object map, object player, bool send = true)
     {
-        ReleaseHandles();
+        ClearCandidates();
         var observation = Observe(map, player, out var visibleGrids, out var visibleUnits, out var knownPlayers);
         var candidates = new List<object>();
         var generator = R.FindClass("Logic.AI.AIActionGenerator");
         var list = R.InvokeStaticMethod(R.FindMethod(generator, "huh", 2), new[] { map, player });
         foreach (var action in N.Items(list))
         {
-            var p = N.Get<IntPtr>(action, "Param");
-            var logic = N.Get<IntPtr>(action, "ActionLogic");
+            var p = N.Get<object>(action, "Param");
+            var logic = N.Get<object>(action, "ActionLogic");
             N.Call(p, "hyi");
             if (!N.Value<bool>(logic, "fqb", p))
                 continue;
@@ -461,7 +450,6 @@ public partial class Battle : MonoBehaviour
                 continue;
             string id = "a" + candidates.Count;
             actions[id] = action;
-            handles.Add(N.il2cpp_gchandle_new(action, false));
             var actionId = N.Call(logic, "get_ixx");
             string details = N.TextCall(actionId, "hys");
             int cost = N.Value<int>(logic, "jhs", p);
@@ -528,7 +516,7 @@ public partial class Battle : MonoBehaviour
         File.WriteAllText(Path.Combine(data, "last-observation.json"), payload);
         if (!send)
         {
-            ReleaseHandles();
+            ClearCandidates();
             Log.LogInfo("LLM preview exported");
             return;
         }
@@ -550,7 +538,6 @@ public partial class Battle : MonoBehaviour
         }
         catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { Log.LogWarning("Agent 日志写入失败：" + e.GetType().Name); }
     }
-    [HideFromIl2Cpp]
     async Task<string> Send(string body, CancellationToken ct, string endpoint = "/decision")
     {
         using var content = new StringContent(body, Encoding.UTF8, "application/json");
@@ -559,8 +546,7 @@ public partial class Battle : MonoBehaviour
             throw new InvalidOperationException(await result.Content.ReadAsStringAsync());
         return await result.Content.ReadAsStringAsync();
     }
-    [HideFromIl2Cpp]
-    object Observe(IntPtr map, IntPtr player, out HashSet<uint> gridIds, out HashSet<uint> unitIds, out HashSet<uint> known, bool ambient = false)
+    object Observe(object map, object player, out HashSet<uint> gridIds, out HashSet<uint> unitIds, out HashSet<uint> known, bool ambient = false)
     {
         gridIds = new();
         unitIds = new();
@@ -569,16 +555,16 @@ public partial class Battle : MonoBehaviour
         var units = new List<object>();
         var cities = new List<object>();
         var players = new List<object>();
-        var sight = N.Get<IntPtr>(player, "Sight");
-        var mapConfig = N.Get<IntPtr>(map, "MapConfig");
+        var sight = N.Get<object>(player, "Sight");
+        var mapConfig = N.Get<object>(map, "MapConfig");
         uint mapWidth = N.Get<uint>(mapConfig, "Width"), mapHeight = N.Get<uint>(mapConfig, "Height");
-        foreach (var g in N.Items(N.Get<IntPtr>(N.Get<IntPtr>(map, "GridMap"), "GridList")))
+        foreach (var g in N.Items(N.Get<object>(N.Get<object>(map, "GridMap"), "GridList")))
         {
             uint id = N.Id(g);
             if (!N.WithUInt(sight, "gdu", id))
                 continue;
             gridIds.Add(id);
-            var pos = N.Get<IntPtr>(g, "Pos");
+            var pos = N.Get<object>(g, "Pos");
             var buildingDef = N.Call(g, "get_tbl");
             var resourceDef = N.Call(g, "get_tbm");
             var roadDef = N.Call(g, "get_tbn");
@@ -614,7 +600,7 @@ public partial class Battle : MonoBehaviour
                 roadName
             });
         }
-        foreach (var u in N.Items(N.Get<IntPtr>(N.Get<IntPtr>(map, "UnitMap"), "UnitList")))
+        foreach (var u in N.Items(N.Get<object>(N.Get<object>(map, "UnitMap"), "UnitList")))
         {
             var owner = N.Call(u, "Player", map);
             uint pid = N.Id(owner), gid = N.Id(N.Call(u, "Grid", map));
@@ -626,7 +612,7 @@ public partial class Battle : MonoBehaviour
             var ap = new Dictionary<string, int>();
             if (pid == N.Id(player))
             {
-                var points = N.Get<IntPtr>(u, "ActionPoint");
+                var points = N.Get<object>(u, "ActionPoint");
                 foreach (var pair in actionPointNames)
                     if (N.WithUInt(points, "ContainsKey", (uint)pair.Value))
                         ap[pair.Key] = N.DictionaryInt(points, pair.Value);
@@ -641,12 +627,12 @@ public partial class Battle : MonoBehaviour
                 gridId = gid,
                 health = N.Get<int>(u, "Health"),
                 type = N.Value<int>(u, "get_ivx"),
-                attack = N.Value<float>(u, "gij", map, IntPtr.Zero),
-                defense = N.Value<float>(u, "gir", map, IntPtr.Zero),
+                attack = N.Value<float>(u, "gij", map, null),
+                defense = N.Value<float>(u, "gir", map, null),
                 actionPoints = ap
             });
         }
-        foreach (var c in N.Items(N.Get<IntPtr>(N.Get<IntPtr>(map, "CityMap"), "CityList")))
+        foreach (var c in N.Items(N.Get<object>(N.Get<object>(map, "CityMap"), "CityList")))
         {
             uint gid = N.Id(N.Call(c, "Grid", map)), pid = N.Id(N.Call(c, "Player", map));
             if (pid != N.Id(player) && !gridIds.Contains(gid))
@@ -661,8 +647,8 @@ public partial class Battle : MonoBehaviour
                 exp = pid == N.Id(player) ? N.Get<int>(c, "LevelExp") : 0
             });
         }
-        var met = N.Get<IntPtr>(player, "MeetPlayers");
-        var all = N.Items(N.Get<IntPtr>(N.Get<IntPtr>(map, "PlayerMap"), "PlayerDataList"));
+        var met = N.Get<object>(player, "MeetPlayers");
+        var all = N.Items(N.Get<object>(N.Get<object>(map, "PlayerMap"), "PlayerDataList"));
         foreach (var p in all)
         {
             uint id = N.Id(p);
@@ -671,7 +657,7 @@ public partial class Battle : MonoBehaviour
             if (id == N.Id(player))
             {
                 var techs = new List<string>();
-                var set = N.Get<IntPtr>(N.Get<IntPtr>(p, "TechTree"), "TechSet");
+                var set = N.Get<object>(N.Get<object>(p, "TechTree"), "TechSet");
                 foreach (var tech in techNames)
                     if (N.WithUInt(set, "Contains", (uint)tech.Value))
                         techs.Add(tech.Key);
@@ -716,9 +702,9 @@ public partial class Battle : MonoBehaviour
             }
         };
     }
-    static string ContentName(IntPtr definition)
+    static string ContentName(object definition)
     {
-        if (definition == IntPtr.Zero) return "";
+        if (definition == null) return "";
         try
         {
             string name = N.TextCall(definition, "get_Name");
@@ -732,14 +718,13 @@ public partial class Battle : MonoBehaviour
         }
         catch { return ""; }
     }
-    static unsafe IntPtr ContentDefinition(IntPtr grid, string referenceField, int kind)
+    static object ContentDefinition(object grid, string referenceField, int kind)
     {
         uint reference = N.Get<uint>(grid, referenceField);
-        if (reference == 0) return IntPtr.Zero;
-        return N.Call(grid, "smi", (IntPtr)(&reference), (IntPtr)(&kind));
+        if (reference == 0) return null;
+        return N.Call(grid, "smi", reference, kind);
     }
-    [HideFromIl2Cpp]
-    object MatchRules(IntPtr config)
+    object MatchRules(object config)
     {
         if (GameRules.ExportMatchContext(data, config))
             try
@@ -750,9 +735,9 @@ public partial class Battle : MonoBehaviour
             catch (Exception error) when (error is IOException or JsonException) { }
         return new { status = "未知", description = "当前对局胜利条件未能读取，不可根据模式名称猜测。" };
     }
-    static string ContentName(IntPtr definition, string unknown)
+    static string ContentName(object definition, string unknown)
     {
-        if (definition == IntPtr.Zero) return "";
+        if (definition == null) return "";
         string name = ContentName(definition);
         return string.IsNullOrWhiteSpace(name) ? unknown : name;
     }
@@ -761,12 +746,12 @@ public partial class Battle : MonoBehaviour
         "Land" => "陆地", "Sea" or "Ocean" => "海洋", "None" or "0" => "地形未知",
         var label => label
     };
-    static string UnitDefinitionId(IntPtr unit)
+    static string UnitDefinitionId(object unit)
     {
         try { return N.DefinitionId(unit, "UnitDefId"); }
         catch { return ""; }
     }
-    string UnitName(IntPtr unit)
+    string UnitName(object unit)
     {
         try
         {
@@ -774,10 +759,10 @@ public partial class Battle : MonoBehaviour
             if (definitionId.Length > 0 && unitNameCache.TryGetValue(definitionId, out var cached))
                 return cached;
             var table = N.Static("Table", "<Instance>k__BackingField");
-            var assets = N.Get<IntPtr>(table, "UnitTypeDataAssets");
+            var assets = N.Get<object>(table, "UnitTypeDataAssets");
             int type = N.Value<int>(unit, "get_ivx"), giant = N.Value<int>(unit, "get_ivy");
             uint level = N.Value<uint>(unit, "get_ivz");
-            foreach (var info in N.Items(N.Get<IntPtr>(assets, "UnitTypeList")))
+            foreach (var info in N.Items(N.Get<object>(assets, "UnitTypeList")))
                 if (definitionId.Length > 0 ? N.DefinitionId(info, "UnitDefId") == definitionId
                     : N.Get<int>(info, "UnitType") == type && N.Get<int>(info, "GiantType") == giant && N.Get<uint>(info, "UnitLevel") == level)
                 {
@@ -793,35 +778,35 @@ public partial class Battle : MonoBehaviour
         return "未知兵种";
     }
     static string EnumName(Dictionary<string, int> names, int value) => names.FirstOrDefault(p => p.Value == value).Key ?? value.ToString();
-    static string LocalizedOrUnknown(IntPtr item, string field)
+    static string LocalizedOrUnknown(object item, string field)
     {
         var text = N.LocalizedField(item, field);
         return string.IsNullOrWhiteSpace(text) ? "未知" : text;
     }
-    string Civilization(IntPtr player)
+    string Civilization(object player)
     {
         uint civ = N.Get<uint>(player, "PlayerCivId"), force = N.Get<uint>(player, "PlayerForceId");
         var table = N.Static("Table", "<Instance>k__BackingField");
-        var assets = N.Get<IntPtr>(table, "PlayerDataAssets");
+        var assets = N.Get<object>(table, "PlayerDataAssets");
         var text = new StringBuilder();
-        foreach (var info in N.Items(N.Get<IntPtr>(assets, "PlayerDataList")))
+        foreach (var info in N.Items(N.Get<object>(assets, "PlayerDataList")))
             if (N.Get<uint>(info, "CivId") == civ && N.Get<uint>(info, "ForceId") == force)
             {
                 foreach (string f in new[] { "CivName", "ForceName", "LeaderName", "EmpireDesc", "LeaderDesc" })
                     text.AppendLine(f + ": " + LocalizedOrUnknown(info, f));
-                var atomSet = N.Get<IntPtr>(info, "TechAtomList");
-                var techAssets = N.Get<IntPtr>(table, "TechDataAssets");
-                foreach (var atom in N.Items(N.Get<IntPtr>(techAssets, "TechAtomList")))
-                    if (atomSet != IntPtr.Zero && N.WithUInt(atomSet, "Contains", N.Get<uint>(atom, "TechAtom")))
+                var atomSet = N.Get<object>(info, "TechAtomList");
+                var techAssets = N.Get<object>(table, "TechDataAssets");
+                foreach (var atom in N.Items(N.Get<object>(techAssets, "TechAtomList")))
+                    if (atomSet != null && N.WithUInt(atomSet, "Contains", N.Get<uint>(atom, "TechAtom")))
                         text.AppendLine("Civilization ability: " + LocalizedOrUnknown(atom, "TechAtomName") + " — " + LocalizedOrUnknown(atom, "Desc"));
             }
-        foreach (var info in N.Items(N.Get<IntPtr>(assets, "EmpireDefinitionList")))
+        foreach (var info in N.Items(N.Get<object>(assets, "EmpireDefinitionList")))
             if (N.Get<uint>(info, "LegacyCivId") == civ && N.Get<uint>(info, "LegacyForceId") == force)
             {
                 text.AppendLine("Empire: " + LocalizedOrUnknown(info, "EmpireName") + "\n" + LocalizedOrUnknown(info, "EmpireDesc"));
-                var ids = new HashSet<string>(N.Items(N.Get<IntPtr>(info, "TechAtomIds")).Select(id => N.TextCall(id, "ToString")));
-                var techAssets = N.Get<IntPtr>(table, "TechDataAssets");
-                foreach (var atom in N.Items(N.Get<IntPtr>(techAssets, "TechAtomList")))
+                var ids = new HashSet<string>(N.Items(N.Get<object>(info, "TechAtomIds")).Select(id => N.TextCall(id, "ToString")));
+                var techAssets = N.Get<object>(table, "TechDataAssets");
+                foreach (var atom in N.Items(N.Get<object>(techAssets, "TechAtomList")))
                     if (ids.Contains(N.TextCall(N.BoxField(atom, "TechAtomId"), "ToString")))
                         text.AppendLine("Civilization ability: " + LocalizedOrUnknown(atom, "TechAtomName") + " — " + LocalizedOrUnknown(atom, "Desc"));
             }

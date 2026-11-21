@@ -5,10 +5,9 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
-using IL2CppSharp;
+using TohotopiaMod.Json;
 using TohotopiaShared;
-using R = IL2CppSharp.Il2CppReflection;
+using R = TohotopiaMod.GameReflection;
 
 namespace TohotopiaMod;
 
@@ -19,36 +18,36 @@ internal static class GameRules
     static readonly List<GameRule> Entries = new();
     static readonly string[] Assets = { "Tech", "TechAtom", "Skill", "Unit", "Hero", "Action", "Terrain", "Resource", "NaturalWonder", "Wiki", "GridContent" };
     static readonly Dictionary<uint, string> Chinese = new();
-    static IntPtr _languageDictionary;
+    static object _languageDictionary;
     static string? _directory;
     static string? _invalidatedDirectory;
     static string? _language;
     static string? _version;
-    static IntPtr _table;
+    static object _table;
     static int _assetIndex;
     static int _rowIndex;
-    static IntPtr _rows;
+    static object _rows;
     static int _rowCount;
     static readonly HashSet<string> HeroIds = new(StringComparer.Ordinal);
     static readonly HashSet<string> HeroGiantTypes = new(StringComparer.Ordinal);
     static bool _heroIdsLoaded;
-    static IntPtr _heroRows;
+    static object _heroRows;
     static int _heroIndex;
     static int _heroCount;
     static bool _done;
     static string? _lastError;
     static string? _lastMatchJson;
     static string? _lastMatchPath;
-    static IntPtr _multilingualManager;
+    static object _multilingualManager;
     static int? _zhValue;
 
     internal static void RequestRefresh()
     {
         InvalidateRuleCatalog(_directory);
         _invalidatedDirectory = _directory;
-        _table = IntPtr.Zero; _done = false; _assetIndex = 0; _rowIndex = 0; _rows = IntPtr.Zero; _rowCount = 0; _heroRows = IntPtr.Zero; _heroIndex = 0; _heroCount = 0;
-        _heroIdsLoaded = false; _lastMatchJson = null; _lastMatchPath = null; _multilingualManager = IntPtr.Zero; _zhValue = null;
-        _languageDictionary = IntPtr.Zero; Chinese.Clear(); Entries.Clear();
+        _table = null; _done = false; _assetIndex = 0; _rowIndex = 0; _rows = null; _rowCount = 0; _heroRows = null; _heroIndex = 0; _heroCount = 0;
+        _heroIdsLoaded = false; _lastMatchJson = null; _lastMatchPath = null; _multilingualManager = null; _zhValue = null;
+        _languageDictionary = null; Chinese.Clear(); Entries.Clear();
     }
 
     // Call from the Unity update loop with a small budget. A missing/unready Table is a no-op.
@@ -63,55 +62,55 @@ internal static class GameRules
                 InvalidateRuleCatalog(runtimeDirectory);
                 _invalidatedDirectory = runtimeDirectory;
                 _directory = runtimeDirectory;
-                _done = false; _assetIndex = 0; _rowIndex = 0; _rows = IntPtr.Zero; _rowCount = 0; Entries.Clear();
-                _heroIdsLoaded = false; _heroRows = IntPtr.Zero; _heroIndex = 0; _heroCount = 0;
+                _done = false; _assetIndex = 0; _rowIndex = 0; _rows = null; _rowCount = 0; Entries.Clear();
+                _heroIdsLoaded = false; _heroRows = null; _heroIndex = 0; _heroCount = 0;
             }
-            IntPtr table = StaticProperty("Table", "Instance");
-            if (table == IntPtr.Zero)
+            object table = StaticProperty("Table", "Instance");
+            if (table == null)
             {
-                if (_table != IntPtr.Zero) { InvalidateRuleCatalog(runtimeDirectory); _table = IntPtr.Zero; _done = false; Entries.Clear(); _assetIndex = 0; _rows = IntPtr.Zero; }
+                if (_table != null) { InvalidateRuleCatalog(runtimeDirectory); _table = null; _done = false; Entries.Clear(); _assetIndex = 0; _rows = null; }
                 return false;
             }
             string language = CurrentLanguage();
-            string version = UnityEngine.Application.version;
+            string version = GameRuntime.Version;
             if (_table != table || _directory != runtimeDirectory || _language != language || _version != version)
             {
-                if (_table != IntPtr.Zero || _version != null) InvalidateRuleCatalog(runtimeDirectory);
+                if (_table != null || _version != null) InvalidateRuleCatalog(runtimeDirectory);
                 _table = table; _directory = runtimeDirectory; _language = language; _version = version;
-                _assetIndex = 0; _rowIndex = 0; _rows = IntPtr.Zero; _rowCount = 0; _done = false; Entries.Clear();
-                HeroIds.Clear(); HeroGiantTypes.Clear(); _heroIdsLoaded = false; _heroRows = IntPtr.Zero; _heroIndex = 0; _heroCount = 0;
-                _languageDictionary = IntPtr.Zero; Chinese.Clear();
+                _assetIndex = 0; _rowIndex = 0; _rows = null; _rowCount = 0; _done = false; Entries.Clear();
+                HeroIds.Clear(); HeroGiantTypes.Clear(); _heroIdsLoaded = false; _heroRows = null; _heroIndex = 0; _heroCount = 0;
+                _languageDictionary = null; Chinese.Clear();
             }
             int maxItems = Math.Max(1, Math.Min(itemBudget, 64));
             double maxMilliseconds = Math.Max(1, Math.Min(timeBudgetMs, 16));
             int processed = 0;
-            if (_languageDictionary == IntPtr.Zero)
+            if (_languageDictionary == null)
             {
                 _multilingualManager = Native.Static("Logic.Multilingual.MultilingualManager", "Instance");
-                if (_multilingualManager == IntPtr.Zero) return false;
-                var multilingual = Native.Get<IntPtr>(_multilingualManager, "_multilingualData");
-                if (multilingual == IntPtr.Zero) return false;
-                _languageDictionary = Native.Get<IntPtr>(multilingual, "_itemDict");
-                if (_languageDictionary == IntPtr.Zero)
+                if (_multilingualManager == null) return false;
+                var multilingual = Native.Get<object>(_multilingualManager, "_multilingualData");
+                if (multilingual == null) return false;
+                _languageDictionary = Native.Get<object>(multilingual, "_itemDict");
+                if (_languageDictionary == null)
                 {
                     Native.UIntCall(multilingual, "hnx", 0);
-                    _languageDictionary = Native.Get<IntPtr>(multilingual, "_itemDict");
-                    if (_languageDictionary == IntPtr.Zero) return false;
+                    _languageDictionary = Native.Get<object>(multilingual, "_itemDict");
+                    if (_languageDictionary == null) return false;
                 }
             }
             if (!_heroIdsLoaded)
             {
-                if (_heroRows == IntPtr.Zero)
+                if (_heroRows == null)
                 {
-                    IntPtr heroData = Native.Get<IntPtr>(_table, "HeroDataAssets");
-                    if (heroData == IntPtr.Zero) return false;
-                    _heroRows = Native.Get<IntPtr>(heroData, "HeroInfoList");
-                    if (_heroRows == IntPtr.Zero) return false;
+                    object heroData = Native.Get<object>(_table, "HeroDataAssets");
+                    if (heroData == null) return false;
+                    _heroRows = Native.Get<object>(heroData, "HeroInfoList");
+                    if (_heroRows == null) return false;
                     _heroCount = Native.Value<int>(_heroRows, "get_Count");
                 }
                 while (_heroIndex < _heroCount && processed < maxItems && timer.Elapsed.TotalMilliseconds < maxMilliseconds)
                 {
-                    IntPtr hero = ListItem(_heroRows, _heroIndex);
+                    object hero = ListItem(_heroRows, _heroIndex);
                     HeroIds.Add(FieldString(hero, "UnitDefId"));
                     string giantType = Scalar(hero, "GiantType");
                     if (!string.IsNullOrWhiteSpace(giantType) && giantType != "None") HeroGiantTypes.Add(giantType);
@@ -123,26 +122,26 @@ internal static class GameRules
             if (_done) return true;
             while (processed < maxItems && timer.Elapsed.TotalMilliseconds < maxMilliseconds && _assetIndex < Assets.Length)
             {
-                if (_rows == IntPtr.Zero)
+                if (_rows == null)
                 {
                     string kind = Assets[_assetIndex];
                     string field = kind switch { "Tech" => "TechList", "TechAtom" => "TechAtomList", "Skill" => "SkillInfoList", "Unit" => "UnitTypeList", "Hero" => "HeroInfoList", "Action" => "ActionList", "Terrain" => "TerrainInfoList", "Resource" => "ResourceInfoList", "NaturalWonder" => "NaturalWonderInfoList", "Wiki" => "Items", _ => "<Definitions>k__BackingField" };
                     string asset = kind switch { "Tech" or "TechAtom" => "TechDataAssets", "Skill" => "SkillDataAssets", "Unit" => "UnitTypeDataAssets", "Hero" => "HeroDataAssets", "Action" => "ActionDataAssets", "NaturalWonder" => "NaturalWonderDataAssets", "Wiki" => "WikiData", _ => "GridAndResourceDataAssets" };
-                    IntPtr data = kind == "GridContent" ? GridCatalog() : Native.Get<IntPtr>(_table, asset);
-                    if (data == IntPtr.Zero) return false; // Wait for Table's asset initialization; do not publish a partial catalog.
+                    object data = kind == "GridContent" ? GridCatalog() : Native.Get<object>(_table, asset);
+                    if (data == null) return false; // Wait for Table's asset initialization; do not publish a partial catalog.
                     if (kind == "Terrain")
                         foreach (string surface in new[] { "Mountain", "Vegetation" })
                         {
-                            var info = Native.Get<IntPtr>(data, surface + "Info");
+                            var info = Native.Get<object>(data, surface + "Info");
                             string name = Localized(info, "ResourceName"), desc = Localized(info, "ResourceDesc");
                             Entries.Add(new GameRule("terrain:" + surface, "terrain", name, desc, Source: SourceFor(surface + "Info", name, desc), Aliases: new[] { surface }));
                         }
-                    _rows = Native.Get<IntPtr>(data, field);
-                    if (_rows == IntPtr.Zero) return false;
+                    _rows = Native.Get<object>(data, field);
+                    if (_rows == null) return false;
                     _rowIndex = 0; _rowCount = Native.Value<int>(_rows, "get_Count");
                 }
-                if (_rowIndex >= _rowCount) { _rows = IntPtr.Zero; _rowCount = 0; _assetIndex++; continue; }
-                IntPtr row = ListItem(_rows, _rowIndex);
+                if (_rowIndex >= _rowCount) { _rows = null; _rowCount = 0; _assetIndex++; continue; }
+                object row = ListItem(_rows, _rowIndex);
                 AddItem(Assets[_assetIndex], row);
                 _rowIndex++; processed++;
             }
@@ -157,24 +156,24 @@ internal static class GameRules
             }
             return _done;
         }
-        catch (Exception ex) { if (_lastError != ex.Message) { UnityEngine.Debug.LogWarning("[TohotopiaMod] Game rule export deferred: " + ex.Message); _lastError = ex.Message; } return false; }
+        catch (Exception ex) { if (_lastError != ex.Message) { Battle.Log.LogWarning("[TohotopiaMod] Game rule export deferred: " + ex.Message); _lastError = ex.Message; } return false; }
     }
 
-    internal static bool ExportMatchContext(string runtimeDirectory, IntPtr mapConfig)
+    internal static bool ExportMatchContext(string runtimeDirectory, object mapConfig)
     {
-        if (mapConfig == IntPtr.Zero || string.IsNullOrWhiteSpace(runtimeDirectory)) return InvalidateMatchContext(runtimeDirectory);
+        if (mapConfig == null || string.IsNullOrWhiteSpace(runtimeDirectory)) return InvalidateMatchContext(runtimeDirectory);
         try
         {
-            var settlements = Native.Items(Native.Get<IntPtr>(mapConfig, "PlayerSettlements"));
+            var settlements = Native.Items(Native.Get<object>(mapConfig, "PlayerSettlements"));
             var settlementEntries = new List<Dictionary<string, object?>>();
             foreach (var item in settlements)
             {
                 var tasks = new List<Dictionary<string, object?>>();
-                foreach (var task in Native.Items(Native.Get<IntPtr>(item, "Tasks")))
+                foreach (var task in Native.Items(Native.Get<object>(item, "Tasks")))
                 {
                     var type = Scalar(task, "TaskType");
                     var limitsForTask = new List<string>();
-                    foreach (var limit in Native.Items(Native.Get<IntPtr>(task, "UnlockLimits"))) limitsForTask.Add(LimitDescription(ObjectString(limit)));
+                    foreach (var limit in Native.Items(Native.Get<object>(task, "UnlockLimits"))) limitsForTask.Add(LimitDescription(ObjectString(limit)));
                     tasks.Add(new Dictionary<string, object?> {
                         ["taskType"] = type, ["description"] = TaskDescription(type, task),
                         ["customDescription"] = Localized(task, "CustomDesc"), ["customHint"] = Localized(task, "CustomHint"),
@@ -189,7 +188,7 @@ internal static class GameRules
                 });
             }
             var limits = new List<string>();
-            foreach (var item in Native.Items(Native.Get<IntPtr>(mapConfig, "MatchLimits"))) limits.Add(LimitDescription(ObjectString(item)));
+            foreach (var item in Native.Items(Native.Get<object>(mapConfig, "MatchLimits"))) limits.Add(LimitDescription(ObjectString(item)));
             string matchSettlement = Scalar(mapConfig, "MatchSettlement");
             string mapConfigId = Scalar(mapConfig, "Id");
             string mapName = Native.TextField(mapConfig, "MapName");
@@ -204,7 +203,7 @@ internal static class GameRules
                 ["source"] = "current MapConfig public match configuration"
             };
             string fingerprintInput = JsonSerializer.Serialize(context, Json);
-            context["fingerprint"] = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(fingerprintInput)));
+            context["fingerprint"] = Hash(fingerprintInput);
             string json = JsonSerializer.Serialize(context, Json);
             string path = Path.Combine(runtimeDirectory, "match-rules.json");
             if (_lastMatchJson != json || _lastMatchPath != path)
@@ -217,7 +216,7 @@ internal static class GameRules
             }
             return true;
         }
-        catch (Exception ex) { UnityEngine.Debug.LogWarning("[TohotopiaMod] Match rule export skipped: " + ex.Message); return InvalidateMatchContext(runtimeDirectory); }
+        catch (Exception ex) { Battle.Log.LogWarning("[TohotopiaMod] Match rule export skipped: " + ex.Message); return InvalidateMatchContext(runtimeDirectory); }
     }
 
     static bool InvalidateMatchContext(string runtimeDirectory)
@@ -232,9 +231,9 @@ internal static class GameRules
         try { if (!string.IsNullOrWhiteSpace(runtimeDirectory)) File.Delete(Path.Combine(runtimeDirectory, "game-rules.json")); } catch { }
     }
 
-    static void AddItem(string kind, IntPtr item)
+    static void AddItem(string kind, object item)
     {
-        if (item == IntPtr.Zero || ReadBool(item, "Retired")) return;
+        if (item == null || (kind is "Action" or "Tech" or "TechAtom" or "Skill" or "Unit") && ReadBool(item, "Retired")) return;
         switch (kind)
         {
             case "Action":
@@ -242,7 +241,7 @@ internal static class GameRules
                 string name = Localized(item, "ActionName"), desc = Localized(item, "Desc");
                 desc += "\n" + Localized(item, "ShortDesc") + "\n科技要求：" + Localized(item, "TechDesc") + "\n锁定条件：" + Localized(item, "LockDesc");
                 desc += $"\n基础费用={Native.Get<int>(item, "Cost")}；同城同建筑费用增量={Native.Get<int>(item, "CostIncreasePerSameCityBuilding")}；城市经验={Native.Get<int>(item, "CityExp")}。实际费用以当前候选为准。";
-                var behavior = Native.Get<IntPtr>(item, "ActionId");
+                var behavior = Native.Get<object>(item, "ActionId");
                 var aliases = new List<string>();
                 foreach (var field in new[] { "ActionType", "UnitActionType", "GridMiscActionType", "ResourceType", "TechType", "PlayerActionType" })
                 {
@@ -267,7 +266,7 @@ internal static class GameRules
             {
                 string name = Localized(item, "Name");
                 var descriptions = new List<string>();
-                foreach (var part in Native.Items(Native.Get<IntPtr>(item, "DescItems")))
+                foreach (var part in Native.Items(Native.Get<object>(item, "DescItems")))
                 {
                     string text = Localized(part, "Desc");
                     if (!string.IsNullOrWhiteSpace(text)) descriptions.Add(text);
@@ -320,7 +319,7 @@ internal static class GameRules
                 var skillIds = FieldIds(item, "SkillIds");
                 var upgrades = new List<string>();
                 foreach (var field in new[] { "UpgradeFromUnitDefId", "UpgradeToUnitDefId" })
-                    try { IntPtr boxed = Native.BoxField(item, field); var value = ObjectString(boxed); if (boxed != IntPtr.Zero && Native.Get<uint>(boxed, "LocalId") != 0) upgrades.Add("upgrade:" + field + ":" + value); } catch { }
+                    try { object boxed = Native.BoxField(item, field); var value = ObjectString(boxed); if (boxed != null && Native.Get<uint>(boxed, "LocalId") != 0) upgrades.Add("upgrade:" + field + ":" + value); } catch { }
                 var level = ReadUInt(item, "UnitLevel");
                 string name = Localized(item, "Name"), desc = Localized(item, "Desc");
                 string giantType = Scalar(item, "GiantType");
@@ -330,14 +329,14 @@ internal static class GameRules
             }
             case "Hero":
             {
-                var tasks = Native.Items(Native.Get<IntPtr>(item, "TaskList"));
+                var tasks = Native.Items(Native.Get<object>(item, "TaskList"));
                 string giantType = Scalar(item, "GiantType");
-                var groups = new Dictionary<uint, List<IntPtr>>();
-                foreach (IntPtr task in tasks)
+                var groups = new Dictionary<uint, List<object>>();
+                foreach (object task in tasks)
                 {
                     uint taskGroup = ReadUInt(task, "TaskId");
                     if (taskGroup == 0) continue;
-                    if (!groups.TryGetValue(taskGroup, out var group)) groups[taskGroup] = group = new List<IntPtr>();
+                    if (!groups.TryGetValue(taskGroup, out var group)) groups[taskGroup] = group = new List<object>();
                     group.Add(task);
                 }
                 var heroUnits = Entries.FindAll(r => r.Category == "hero" && r.Aliases?.Contains("GiantType:" + giantType, StringComparer.Ordinal) == true);
@@ -351,7 +350,7 @@ internal static class GameRules
                     string taskRuleId = heroUnit.Id + ":task:level:" + level.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":group:" + groupText;
                     var descriptions = new List<string>();
                     var related = new List<string> { "hero:" + heroUnit.Id };
-                    foreach (IntPtr task in groups[applicableGroup])
+                    foreach (object task in groups[applicableGroup])
                     {
                         string desc = Localized(task, "Desc");
                         uint experience = ReadUInt(task, "ExperiencePerProgress");
@@ -374,48 +373,47 @@ internal static class GameRules
 
     static string[] Merge(string p1, string[] a, string p2, string[]? b)
     { var r = new List<string>(); foreach (var x in a) r.Add(p1 + x); if (b != null) foreach (var x in b) r.Add(p2 + x); return r.ToArray(); }
-    static string[] FieldIds(IntPtr o, string field) { var xs = Native.Items(Native.Get<IntPtr>(o, field)); var r = new string[xs.Count]; for (int i=0;i<xs.Count;i++) r[i] = ObjectString(xs[i]); return r; }
-    static string[] TechPrerequisites(IntPtr item)
+    static string[] FieldIds(object o, string field) { var xs = Native.Items(Native.Get<object>(o, field)); var r = new string[xs.Count]; for (int i=0;i<xs.Count;i++) r[i] = ObjectString(xs[i]); return r; }
+    static string[] TechPrerequisites(object item)
     {
         try
         {
-            var groups = Native.Items(Native.Get<IntPtr>(item, "PrerequisiteGroups"));
+            var groups = Native.Items(Native.Get<object>(item, "PrerequisiteGroups"));
             if (groups.Count > 0)
             {
                 var encoded = new List<string>();
                 for (int i = 0; i < groups.Count; i++)
-                    foreach (var id in Native.Items(Native.Get<IntPtr>(groups[i], "AnyOfTechIds"))) encoded.Add("group" + (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + ObjectString(id));
+                    foreach (var id in Native.Items(Native.Get<object>(groups[i], "AnyOfTechIds"))) encoded.Add("group" + (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + ObjectString(id));
                 return encoded.ToArray(); // Every group is required; any member within a group satisfies it.
             }
         }
         catch { }
         return FieldIds(item, "FatherTechIds");
     }
-    static IntPtr ListItem(IntPtr list, int index)
-    { IntPtr p = System.Runtime.InteropServices.Marshal.AllocHGlobal(sizeof(int)); try { System.Runtime.InteropServices.Marshal.WriteInt32(p, index); return Native.Call(list, "get_Item", p); } finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(p); } }
-    static string[] Aliases(string prefix, IntPtr o, string field) { try { var value = Scalar(o, field); return string.IsNullOrWhiteSpace(value) ? Array.Empty<string>() : new[] { value, prefix + ":" + value }; } catch { return Array.Empty<string>(); } }
-    static string[] UnitAliases(IntPtr o) { var result = new List<string>(); result.AddRange(Aliases("UnitType", o, "UnitType")); result.AddRange(Aliases("GiantType", o, "GiantType")); try { var level = ReadUInt(o, "UnitLevel"); if (level > 0) result.Add("UnitLevel:" + level.ToString(System.Globalization.CultureInfo.InvariantCulture)); } catch { } return result.ToArray(); }
-    static IntPtr GridCatalog()
+    static object ListItem(object list, int index) => Native.Call(list, "get_Item", index);
+    static string[] Aliases(string prefix, object o, string field) { try { var value = Scalar(o, field); return string.IsNullOrWhiteSpace(value) ? Array.Empty<string>() : new[] { value, prefix + ":" + value }; } catch { return Array.Empty<string>(); } }
+    static string[] UnitAliases(object o) { var result = new List<string>(); result.AddRange(Aliases("UnitType", o, "UnitType")); result.AddRange(Aliases("GiantType", o, "GiantType")); try { var level = ReadUInt(o, "UnitLevel"); if (level > 0) result.Add("UnitLevel:" + level.ToString(System.Globalization.CultureInfo.InvariantCulture)); } catch { } return result.ToArray(); }
+    static object GridCatalog()
     {
         var catalog = Native.Static("TH1_Logic.GridContent.GridContentRuntime", "_catalog");
-        return catalog != IntPtr.Zero ? catalog : Native.Static("TH1_Logic.GridContent.GridContentRuntime", "BuiltinCatalog");
+        return catalog != null ? catalog : Native.Static("TH1_Logic.GridContent.GridContentRuntime", "BuiltinCatalog");
     }
-    static unsafe string GridNumbers(IntPtr item)
+    static string GridNumbers(object item)
     {
-        var numbers = Native.Get<IntPtr>(item, "<NumericOverrides>k__BackingField");
+        var numbers = Native.Get<object>(item, "<NumericOverrides>k__BackingField");
         var text = new StringBuilder();
         foreach (var field in Native.EnumValues("TH1_Data.GridContentNumericField"))
         {
             int key = field.Value, value = 0;
-            if (Native.Value<bool>(numbers, "TryGetValue", (IntPtr)(&key), (IntPtr)(&value)))
+            if (Native.TryDictionaryInt(numbers, key, out value))
                 text.Append("\n").Append(field.Key).Append('=').Append(value);
         }
         return text.ToString();
     }
-    static void AddVariants(IntPtr item, string field, string id, string category)
+    static void AddVariants(object item, string field, string id, string category)
     {
         int index = 0;
-        foreach (var variant in Native.Items(Native.Get<IntPtr>(item, field)))
+        foreach (var variant in Native.Items(Native.Get<object>(item, field)))
         {
             index++;
             string name = Localized(variant, "Name"), desc = Localized(variant, "Desc");
@@ -425,7 +423,7 @@ internal static class GameRules
         }
     }
     static string SourceFor(string type, string name, string desc) => string.IsNullOrWhiteSpace(name) ? type + ":unresolvedLocalization" : type;
-    static string Localized(IntPtr o, string field)
+    static string Localized(object o, string field)
     {
         string raw = Native.TextField(o, field);
         if (uint.TryParse(raw, out uint id)) raw = ChineseText(id);
@@ -435,47 +433,43 @@ internal static class GameRules
     {
         if (Chinese.TryGetValue(id, out var chinese) && !string.IsNullOrWhiteSpace(chinese)) return chinese;
         var entry = Native.DictionaryObject(_languageDictionary, id);
-        if (entry != IntPtr.Zero)
+        if (entry != null)
         {
             chinese = Native.TextField(entry, "ZH");
             if (!string.IsNullOrWhiteSpace(chinese)) { Chinese[id] = chinese; return chinese; }
         }
         try
         {
-            if (_multilingualManager == IntPtr.Zero) _multilingualManager = StaticProperty("Logic.Multilingual.MultilingualManager", "Instance");
+            if (_multilingualManager == null) _multilingualManager = StaticProperty("Logic.Multilingual.MultilingualManager", "Instance");
             _zhValue ??= Native.EnumValues("Logic.Multilingual.MultilingualType").TryGetValue("ZH", out int zhValue) ? zhValue : 1;
-            if (_multilingualManager != IntPtr.Zero)
+            if (_multilingualManager != null)
             {
-                IntPtr a = System.Runtime.InteropServices.Marshal.AllocHGlobal(sizeof(uint));
-                IntPtr b = System.Runtime.InteropServices.Marshal.AllocHGlobal(sizeof(int));
-                try { System.Runtime.InteropServices.Marshal.WriteInt32(a, unchecked((int)id)); System.Runtime.InteropServices.Marshal.WriteInt32(b, _zhValue.Value);
-                    IntPtr result = Native.Call(_multilingualManager, "hoz", a, b);
-                    if (result != IntPtr.Zero) { var text = Il2CppAPI.Il2CppStringToManaged(result); if (!string.IsNullOrWhiteSpace(text) && !uint.TryParse(text, out _)) return text; }
-                } finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(a); System.Runtime.InteropServices.Marshal.FreeHGlobal(b); }
+                var result = Native.Call(_multilingualManager, "hoz", id, _zhValue.Value);
+                if (result is string text && !string.IsNullOrWhiteSpace(text) && !uint.TryParse(text, out _)) return text;
             }
         }
         catch { }
         return ""; // Never present an unresolved localization key as player-facing prose.
     }
-    static string FieldString(IntPtr o, string field) => Native.DefinitionId(o, field);
-    static string ObjectString(IntPtr o)
+    static string FieldString(object o, string field) => Native.DefinitionId(o, field);
+    static string ObjectString(object o)
     {
-        if (o == IntPtr.Zero) return "";
+        if (o == null) return "";
         try { return Native.BoxedDefinitionId(o); } catch { }
         return Native.TextCall(o, "ToString");
     }
-    static string Scalar(IntPtr o, string field) => EnumText(o, field);
-    static string EnumText(IntPtr o, string field) => Native.EnumField(o, field);
-    static bool ReadBool(IntPtr o, string field) { try { return Native.Get<byte>(o, field) != 0; } catch { return false; } }
-    static int? ReadInt(IntPtr o, string field) { try { return Native.Get<int>(o, field); } catch { return null; } }
-    static uint ReadUInt(IntPtr o, string field) { try { return Native.Get<uint>(o, field); } catch { return 0; } }
-    static IntPtr StaticProperty(string type, string property)
+    static string Scalar(object o, string field) => EnumText(o, field);
+    static string EnumText(object o, string field) => Native.EnumField(o, field);
+    static bool ReadBool(object o, string field) { try { return Native.Get<byte>(o, field) != 0; } catch { return false; } }
+    static int? ReadInt(object o, string field) { try { return Native.Get<int>(o, field); } catch { return null; } }
+    static uint ReadUInt(object o, string field) { try { return Native.Get<uint>(o, field); } catch { return 0; } }
+    static object StaticProperty(string type, string property)
     {
-        var c = R.FindClass(type); if (c == IntPtr.Zero) return IntPtr.Zero;
+        var c = R.FindClass(type); if (c == null) return null;
         var m = R.FindMethod(c, "get_" + property, 0);
-        if (m != IntPtr.Zero) return R.InvokeStaticMethod(m, Array.Empty<IntPtr>());
+        if (m != null) return R.InvokeStaticMethod(m, Array.Empty<object>());
         try { return Native.Static(type, "<" + property + ">k__BackingField"); } catch { }
-        try { return Native.Static(type, property); } catch { return IntPtr.Zero; }
+        try { return Native.Static(type, property); } catch { return null; }
     }
     static string CurrentLanguage() => "ZH";
     static string MatchSettlementDescription(string value) => value switch {
@@ -491,7 +485,7 @@ internal static class GameRules
         "None" => "未配置玩家结算类型，具体条件未知。",
         _ => "未知玩家结算类型，具体条件未知。"
     };
-    static string TaskDescription(string value, IntPtr task)
+    static string TaskDescription(string value, object task)
     {
         int p1 = Native.Get<int>(task, "Param1"), p2 = Native.Get<int>(task, "Param2");
         string p4 = Scalar(task, "Param4");
@@ -516,6 +510,11 @@ internal static class GameRules
         "PlayerOnlyShowT2AndT22Tech" => "玩家只显示T2和T22科技。", "PlayerCannotNextTurn" => "玩家不能结束回合。",
         "None" => "无额外规则限制。", _ => "未知限制：" + value
     };
+    static string Hash(string text)
+    {
+        using var sha = SHA256.Create();
+        return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(text))).Replace("-", "");
+    }
     static void WriteAtomic<T>(string path, T value)
     { Directory.CreateDirectory(Path.GetDirectoryName(path)!); string tmp=path+".tmp"; File.WriteAllText(tmp, JsonSerializer.Serialize(value, Json)); if (File.Exists(path)) File.Replace(tmp,path,null); else File.Move(tmp,path); }
 }

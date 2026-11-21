@@ -1,218 +1,166 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
-using IL2CppSharp;
-using Il2CppInterop.Runtime.Injection;
-using R = IL2CppSharp.Il2CppReflection;
+using System.Linq;
+using System.Reflection;
+
 namespace TohotopiaMod;
 
-internal static unsafe class Native
+// All objects stay in the game's managed runtime. No native pointers or interop wrappers.
+internal static class Native
 {
-    [DllImport("GameAssembly", CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr il2cpp_object_get_class(IntPtr o);
-    [DllImport("GameAssembly", CallingConvention = CallingConvention.Cdecl)] static extern IntPtr il2cpp_class_get_parent(IntPtr c);
-    [DllImport("GameAssembly", CallingConvention = CallingConvention.Cdecl)] static extern IntPtr il2cpp_class_get_methods(IntPtr c, ref IntPtr iterator);
-    [DllImport("GameAssembly", CallingConvention = CallingConvention.Cdecl)] static extern void il2cpp_field_set_value(IntPtr o, IntPtr f, IntPtr v);
-    [DllImport("GameAssembly", CallingConvention = CallingConvention.Cdecl)] internal static extern uint il2cpp_gchandle_new(IntPtr o, bool pinned);
-    [DllImport("GameAssembly", CallingConvention = CallingConvention.Cdecl)] internal static extern void il2cpp_gchandle_free(uint handle);
-    [DllImport("GameAssembly", CallingConvention = CallingConvention.Cdecl)] static extern IntPtr il2cpp_class_get_type(IntPtr c);
-    [DllImport("GameAssembly", CallingConvention = CallingConvention.Cdecl)] static extern IntPtr il2cpp_class_get_property_from_name(IntPtr c, string name);
-    [DllImport("GameAssembly", CallingConvention = CallingConvention.Cdecl)] static extern IntPtr il2cpp_property_get_get_method(IntPtr p);
-    [DllImport("GameAssembly", CallingConvention = CallingConvention.Cdecl)] static extern IntPtr il2cpp_type_get_object(IntPtr t);
-    internal static IntPtr Class(IntPtr o) => o != IntPtr.Zero ? il2cpp_object_get_class(o) : throw new InvalidOperationException("Null native object");
-    internal static int RefreshInterpreterCalls(string type)
+    internal static Type Class(object o) => o?.GetType() ?? throw new InvalidOperationException("Null game object");
+    static readonly Dictionary<(Type, string), FieldInfo> Fields = new();
+    static FieldInfo Field(Type type, string name)
     {
-        int refreshed = 0;
-        var klass = R.FindClass(type);
-        if (klass == IntPtr.Zero)
-            return refreshed;
-        IntPtr iterator = IntPtr.Zero, method;
-        while ((method = il2cpp_class_get_methods(klass, ref iterator)) != IntPtr.Zero)
+        if (Fields.TryGetValue((type, name), out var cached)) return cached;
+        for (var t = type; t != null; t = t.BaseType)
         {
-            var info = HybridCLRCompat.WrapMethodInfo(method);
-            if (info != null && info.IsInterpterImpl && info.InterpData != IntPtr.Zero)
-            {
-                // Do not free old code: active interpreter frames may still use it.
-                // The next invocation transforms IL against the new method flags.
-                info.InterpData = IntPtr.Zero;
-                refreshed++;
-            }
+            var field = t.GetField(name, GameReflection.Flags | BindingFlags.DeclaredOnly);
+            if (field != null) { Fields[(type, name)] = field; return field; }
         }
-        return refreshed;
+        throw new MissingFieldException(type.FullName, name);
     }
-    static IntPtr Field(IntPtr o, string name)
+    internal static T ConvertValue<T>(object value)
     {
-        for (var c = Class(o); c != IntPtr.Zero; c = il2cpp_class_get_parent(c))
-        {
-            var f = R.FindField(c, name);
-            if (f != IntPtr.Zero)
-                return f;
-        }
-        throw new InvalidOperationException("Missing field " + name);
+        if (value == null) return default;
+        if (value is T typed) return typed;
+        return (T)Convert.ChangeType(value, typeof(T), System.Globalization.CultureInfo.InvariantCulture);
     }
-    internal static T Get<T>(IntPtr o, string name) where T : unmanaged
+    internal static T Get<T>(object o, string name) => o == null ? default : ConvertValue<T>(Field(o.GetType(), name).GetValue(o));
+    internal static void Set(object o, string name, object value)
     {
-        if (o == IntPtr.Zero)
-            return default;
-        T result = default;
-        R.GetFieldValueRaw(o, Field(o, name), &result);
-        return result;
+        var field = Field(Class(o), name);
+        field.SetValue(o, GameReflection.Argument(value, field.FieldType));
     }
-    internal static void SetInt(IntPtr o, string name, int v) => il2cpp_field_set_value(o, Field(o, name), (IntPtr)(&v));
-    internal static void Set<T>(IntPtr o, string name, T v) where T : unmanaged => il2cpp_field_set_value(o, Field(o, name), (IntPtr)(&v));
-    // IL2CPP reference fields take the object pointer itself, while value fields
-    // above take a pointer to value storage. Passing &v stores a dangling stack
-    // address in Lobby, _lobby and string fields.
-    internal static void Set(IntPtr o, string name, IntPtr v) => il2cpp_field_set_value(o, Field(o, name), v);
-    internal static void SetText(IntPtr o, string name, string value) => Set(o, name, R.CreateIl2CppString(value));
-    [DllImport("GameAssembly", CallingConvention = CallingConvention.Cdecl)] static extern IntPtr il2cpp_object_new(IntPtr c);
-    internal static IntPtr New(string name)
+    internal static void SetInt(object o, string name, int v) => Set(o, name, v);
+    internal static void SetBool(object o, string name, bool v) => Set(o, name, v);
+    internal static void SetText(object o, string name, string v) => Set(o, name, v);
+    internal static object Static(string type, string field) => Field(GameReflection.RequireClass(type), field).GetValue(null);
+    internal static object New(string type) => Activator.CreateInstance(GameReflection.RequireClass(type), true);
+    internal static MethodInfo Method(object o, string name, int count) =>
+        GameReflection.FindMethod(Class(o), name, count) ?? throw new MissingMethodException(Class(o).FullName, name);
+    internal static object Call(object o, string method, params object[] args) => GameReflection.InvokeMethod(Method(o, method, args.Length), o, args);
+    internal static T Value<T>(object o, string method, params object[] args) => ConvertValue<T>(Call(o, method, args));
+    internal static void UIntCall(object o, string method, uint v) => Call(o, method, v);
+    internal static void TwoInts(object o, string method, int a, int b) => Call(o, method, a, b);
+    internal static bool WithUInt(object o, string method, uint v) => Value<bool>(o, method, v);
+    internal static string TextField(object o, string field) => Get<string>(o, field) ?? "";
+    internal static string LocalizedField(object o, string field)
     {
-        var c = R.FindClass(name);
-        if (c == IntPtr.Zero)
-            throw new TypeLoadException(name);
-        var o = il2cpp_object_new(c);
-        Call(o, ".ctor");
-        return o;
-    }
-    internal static void UIntCall(IntPtr o, string name, uint a)
-    {
-        Call(o, name, (IntPtr)(&a));
-    }
-    internal static void TwoInts(IntPtr o, string name, int a, int b)
-    {
-        Call(o, name, (IntPtr)(&a), (IntPtr)(&b));
-    }
-    internal static void SetBool(IntPtr o, string name, bool v) => R.SetFieldValueBool(o, Field(o, name), v);
-    internal static IntPtr Static(string type, string field) => R.GetStaticFieldValue(R.FindClass(type), field);
-    internal static IntPtr Method(IntPtr o, string name, int count)
-    {
-        for (var c = Class(o); c != IntPtr.Zero; c = il2cpp_class_get_parent(c))
-        {
-            if (name.StartsWith("get_"))
-            {
-                var p = il2cpp_class_get_property_from_name(c, name.Substring(4));
-                if (p != IntPtr.Zero)
-                {
-                    var getter = il2cpp_property_get_get_method(p);
-                    if (getter != IntPtr.Zero)
-                        return getter;
-                }
-            }
-            var m = R.FindMethod(c, name, count);
-            if (m != IntPtr.Zero)
-                return m;
-        }
-        throw new MissingMethodException(name);
-    }
-    internal static IntPtr Call(IntPtr o, string method, params IntPtr[] args) => R.InvokeMethod(Method(o, method, args.Length), o, args);
-    internal static T Value<T>(IntPtr o, string method, params IntPtr[] args) where T : unmanaged => R.InvokeGet<T>(Method(o, method, args.Length), o, args);
-    internal static bool WithUInt(IntPtr o, string method, uint v) => Value<bool>(o, method, (IntPtr)(&v));
-    internal static string TextField(IntPtr o, string field)
-    {
-        var p = Get<IntPtr>(o, field);
-        return p == IntPtr.Zero ? "" : Il2CppAPI.Il2CppStringToManaged(p);
-    }
-    internal static string LocalizedField(IntPtr o, string field)
-    {
-        var text = TextField(o, field);
-        if (!uint.TryParse(text, out uint id))
-            return text;
+        string text = TextField(o, field);
+        if (!uint.TryParse(text, out uint id)) return text;
         var manager = Static("Logic.Multilingual.MultilingualManager", "Instance");
-        if (manager == IntPtr.Zero) return "";
-        var result = Call(manager, "hoy", (IntPtr)(&id));
-        var localized = result == IntPtr.Zero ? "" : Il2CppAPI.Il2CppStringToManaged(result);
-        return uint.TryParse(localized, out _) ? "" : localized;
+        var localized = manager == null ? "" : (string)Call(manager, "hoy", id);
+        return uint.TryParse(localized, out _) ? "" : localized ?? "";
     }
-    [DllImport("GameAssembly", CallingConvention = CallingConvention.Cdecl)] static extern IntPtr il2cpp_field_get_value_object(IntPtr field, IntPtr obj);
-    internal static IntPtr BoxField(IntPtr o, string name) => il2cpp_field_get_value_object(Field(o, name), o);
-    // A definition ID is five uints, not an object pointer. Avoid invoking a
-    // value-type ToString through runtime_invoke with a boxed this pointer.
-    internal struct ModIdentity { public uint Part0, Part1, Part2, Part3; }
-    internal struct DefinitionIdentity { public ModIdentity ModId; public uint LocalId; }
-    internal static string DefinitionId(IntPtr o, string field)
-    {
-        var id = Get<DefinitionIdentity>(o, field);
-        return FormatIdentity(id.ModId, id.LocalId);
-    }
-    internal static string FormatIdentity(ModIdentity mod, uint local) =>
-        Guid.ParseExact($"{mod.Part0:x8}{mod.Part1:x8}{mod.Part2:x8}{mod.Part3:x8}", "N").ToString("D") + "/" + local.ToString("D8", System.Globalization.CultureInfo.InvariantCulture);
-    internal static string BoxedDefinitionId(IntPtr o) => FormatIdentity(Get<ModIdentity>(o, "ModId"), Get<uint>(o, "LocalId"));
-    [DllImport("GameAssembly", CallingConvention = CallingConvention.Cdecl)] static extern IntPtr il2cpp_field_get_type(IntPtr field);
-    [DllImport("GameAssembly", CallingConvention = CallingConvention.Cdecl)] static extern IntPtr il2cpp_class_from_type(IntPtr type);
-    [DllImport("GameAssembly", CallingConvention = CallingConvention.Cdecl)] static extern IntPtr il2cpp_class_get_name(IntPtr type);
-    [DllImport("GameAssembly", CallingConvention = CallingConvention.Cdecl)] static extern IntPtr il2cpp_class_get_namespace(IntPtr type);
-    static readonly Dictionary<IntPtr, Dictionary<string, int>> EnumFields = new();
-    internal static string EnumField(IntPtr o, string field)
-    {
-        var f = Field(o, field);
-        if (!EnumFields.TryGetValue(f, out var names))
-        {
-            var type = il2cpp_class_from_type(il2cpp_field_get_type(f));
-            string ns = Marshal.PtrToStringAnsi(il2cpp_class_get_namespace(type)) ?? "";
-            string name = Marshal.PtrToStringAnsi(il2cpp_class_get_name(type)) ?? "";
-            EnumFields[f] = names = EnumValues(ns.Length == 0 ? name : ns + "." + name);
-        }
-        int value = Get<int>(o, field);
-        foreach (var name in names) if (name.Value == value) return name.Key;
-        return value.ToString(System.Globalization.CultureInfo.InvariantCulture);
-    }
-    [DllImport("GameAssembly", CallingConvention = CallingConvention.Cdecl)] static extern IntPtr il2cpp_class_get_fields(IntPtr c, ref IntPtr iterator);
-    [DllImport("GameAssembly", CallingConvention = CallingConvention.Cdecl)] static extern IntPtr il2cpp_field_get_name(IntPtr f);
-    [DllImport("GameAssembly", CallingConvention = CallingConvention.Cdecl)] static extern uint il2cpp_field_get_flags(IntPtr f);
-    [DllImport("GameAssembly", CallingConvention = CallingConvention.Cdecl)] static extern void il2cpp_field_static_get_value(IntPtr f, IntPtr v);
+    internal static object BoxField(object o, string field) => Get<object>(o, field);
+    internal static string DefinitionId(object o, string field) => BoxedDefinitionId(BoxField(o, field));
+    internal static string BoxedDefinitionId(object o) => o?.ToString() ?? "";
+    internal static string EnumField(object o, string field) => Get<object>(o, field)?.ToString() ?? "";
     internal static Dictionary<string, int> EnumValues(string name)
     {
         var result = new Dictionary<string, int>();
-        var c = R.FindClass(name);
-        if (c == IntPtr.Zero)
-            return result;
-        IntPtr iterator = IntPtr.Zero, f;
-        while ((f = il2cpp_class_get_fields(c, ref iterator)) != IntPtr.Zero)
-        {
-            if ((il2cpp_field_get_flags(f) & 0x40) == 0)
-                continue;
-            int value = 0;
-            il2cpp_field_static_get_value(f, (IntPtr)(&value));
-            result[Marshal.PtrToStringAnsi(il2cpp_field_get_name(f))] = value;
-        }
+        var type = GameReflection.FindClass(name);
+        if (type == null) return result;
+        foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Static))
+            if (field.IsLiteral) result[field.Name] = Convert.ToInt32(field.GetRawConstantValue());
         return result;
     }
-    internal static int DictionaryInt(IntPtr dictionary, int key)
+    internal static int DictionaryInt(object dictionary, int key) => Value<int>(dictionary, "get_Item", key);
+    internal static bool TryDictionaryInt(object dictionary, int key, out int value)
     {
-        return Value<int>(dictionary, "get_Item", (IntPtr)(&key));
+        object[] args = { key, 0 };
+        bool found = Value<bool>(dictionary, "TryGetValue", args);
+        value = ConvertValue<int>(args[1]);
+        return found;
     }
-    internal static IntPtr DictionaryObject(IntPtr dictionary, uint key)
+    internal static object DictionaryObject(object dictionary, uint key)
     {
-        IntPtr value = IntPtr.Zero;
-        return Value<bool>(dictionary, "TryGetValue", (IntPtr)(&key), (IntPtr)(&value)) ? value : IntPtr.Zero;
+        if (dictionary == null) return null;
+        object[] args = { key, null };
+        return Value<bool>(dictionary, "TryGetValue", args) ? args[1] : null;
     }
-    internal static string TextCall(IntPtr o, string method) => R.InvokeGetString(Method(o, method, 0), o);
-    internal static string TextCallWithUInt(IntPtr o, string method, uint value)
+    internal static string TextCall(object o, string method) => (string)Call(o, method) ?? "";
+    internal static string TextCallWithUInt(object o, string method, uint v) => (string)Call(o, method, v) ?? "";
+    internal static List<object> Items(object list)
     {
-        var result = Call(o, method, (IntPtr)(&value));
-        return result == IntPtr.Zero ? "" : Il2CppAPI.Il2CppStringToManaged(result);
-    }
-    internal static List<IntPtr> Items(IntPtr list)
-    {
-        var result = new List<IntPtr>();
-        if (list == IntPtr.Zero)
-            return result;
-        int n = Value<int>(list, "get_Count");
-        for (int i = 0; i < n; i++)
-        {
-            int index = i;
-            result.Add(Call(list, "get_Item", (IntPtr)(&index)));
-        }
+        var result = new List<object>();
+        if (list is IEnumerable items) foreach (var item in items) result.Add(item);
         return result;
     }
-    internal static uint Id(IntPtr o) => Get<uint>(o, "Id");
-    internal static IntPtr FindObject(string type)
+    internal static uint Id(object o) => Get<uint>(o, "Id");
+    internal static object FindObject(string type)
     {
-        var c = R.FindClass(type);
-        if (c == IntPtr.Zero)
-            return IntPtr.Zero;
-        var t = il2cpp_type_get_object(il2cpp_class_get_type(c));
-        var m = R.FindMethod(R.FindClass("UnityEngine.Object"), "FindObjectOfType", 1);
-        return R.InvokeStaticMethod(m, new[] { t });
+        var unityObject = GameReflection.RequireClass("UnityEngine.Object");
+        var method = unityObject.GetMethod("FindObjectOfType", new[] { typeof(Type) });
+        return method.Invoke(null, new object[] { GameReflection.RequireClass(type) });
     }
+}
+
+internal static class GameReflection
+{
+    internal const BindingFlags Flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+    static readonly Dictionary<string, Type> Types = new();
+    internal static Type RequireClass(string name) => FindClass(name) ?? throw new TypeLoadException(name);
+    internal static Type FindClass(string name)
+    {
+        if (Types.TryGetValue(name, out var cached)) return cached;
+        var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+        foreach (var assembly in assemblies)
+        {
+            var type = assembly.GetType(name, false);
+            if (type != null) { Types[name] = type; return type; }
+        }
+        if (name.IndexOf('.') < 0)
+            foreach (var assembly in assemblies.Where(a => a.GetName().Name == "TH1.Hotfix"))
+                foreach (var type in assembly.GetTypes())
+                    if (type.Name == name) { Types[name] = type; return type; }
+        return null;
+    }
+    static readonly Dictionary<(Type, string, int), MethodInfo> Methods = new();
+    internal static MethodInfo FindMethod(Type type, string name, int count)
+    {
+        if (Methods.TryGetValue((type, name, count), out var cached)) return cached;
+        var method = ResolveMethod(type, name, count);
+        if (method != null) Methods[(type, name, count)] = method;
+        return method;
+    }
+    static MethodInfo ResolveMethod(Type type, string name, int count)
+    {
+        for (var t = type; t != null; t = t.BaseType)
+        {
+            // Getter names in metadata can be obfuscated independently of the property.
+            if (name.StartsWith("get_", StringComparison.Ordinal))
+            {
+                var getter = t.GetProperty(name.Substring(4), Flags | BindingFlags.DeclaredOnly)?.GetGetMethod(true);
+                if (getter != null && getter.GetParameters().Length == count) return getter;
+            }
+            var matches = t.GetMethods(Flags | BindingFlags.DeclaredOnly).Where(m => m.Name == name && m.GetParameters().Length == count).ToArray();
+            if (matches.Length > 1) throw new AmbiguousMatchException(t.FullName + "." + name);
+            if (matches.Length == 1) return matches[0];
+        }
+        foreach (var contract in type.GetInterfaces())
+        {
+            var matches = contract.GetMethods().Where(m => m.Name == name && m.GetParameters().Length == count).ToArray();
+            if (matches.Length == 1) return matches[0];
+        }
+        return null;
+    }
+    internal static MethodInfo FindMethod(string type, string name, int count) => FindMethod(RequireClass(type), name, count);
+    internal static object Argument(object value, Type type)
+    {
+        if (type.IsByRef) type = type.GetElementType();
+        if (value == null || type.IsInstanceOfType(value)) return value;
+        return type.IsEnum ? Enum.ToObject(type, value) : Convert.ChangeType(value, type, System.Globalization.CultureInfo.InvariantCulture);
+    }
+    internal static object InvokeMethod(MethodInfo method, object target, object[] args)
+    {
+        var parameters = method.GetParameters();
+        for (int i = 0; i < args.Length; i++) args[i] = Argument(args[i], parameters[i].ParameterType);
+        try { return method.Invoke(target, args); }
+        catch (TargetInvocationException error) when (error.InnerException != null)
+        { System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error.InnerException).Throw(); throw; }
+    }
+    internal static object InvokeStaticMethod(MethodInfo method, object[] args) => InvokeMethod(method, null, args);
 }

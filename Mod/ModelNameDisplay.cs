@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using TMPro;
 using TohotopiaShared;
 using N = TohotopiaMod.Native;
 
@@ -9,10 +8,10 @@ namespace TohotopiaMod;
 // Only changes the local ranking label, never the synchronized player data.
 internal sealed class ModelNameDisplay
 {
-    readonly Dictionary<IntPtr, (string Original, string Applied)> labels = new();
-    readonly Dictionary<IntPtr, (string Original, string Applied)> lobbyLabels = new();
+    readonly Dictionary<object, (string Original, string Applied)> labels = new();
+    readonly Dictionary<object, (string Original, string Applied)> lobbyLabels = new();
     bool warned;
-    IntPtr turnLabel;
+    object turnLabel;
     string turnOriginal = "", turnApplied = "";
     bool turnWarned;
 
@@ -21,27 +20,27 @@ internal sealed class ModelNameDisplay
         try
         {
             var ui = N.Static("TH1_Core.Managers.UIManager", "<Instance>k__BackingField");
-            var pointer = N.Get<IntPtr>(ui, "_aiPlayingHintMessage");
-            if (pointer == IntPtr.Zero) { turnLabel = IntPtr.Zero; return; }
-            var label = new TextMeshProUGUI(pointer);
-            string original = label.text ?? "";
+            var pointer = N.Get<object>(ui, "_aiPlayingHintMessage");
+            if (pointer == null) { turnLabel = null; return; }
+            var label = new GameLabel(pointer);
+            string original = label.Text ?? "";
             if (turnLabel == pointer && original == turnApplied && turnApplied.Length > 0)
             {
                 original = turnOriginal;
-                label.text = original;
+                label.Text = original;
             }
             turnLabel = pointer;
             turnOriginal = turnApplied = "";
-            if (!room.ModelsEnabled || !label.gameObject.activeInHierarchy) return;
+            if (!room.ModelsEnabled || !label.Active) return;
             var map = N.Static("TH1_Logic.Core.Main", "MapData");
-            if (map == IntPtr.Zero) return;
+            if (map == null) return;
             var player = N.Call(map, "get_ivn");
-            if (player == IntPtr.Zero || fallback.IsNative(N.Id(player), N.Get<uint>(player, "Turn"))) return;
+            if (player == null || fallback.IsNative(N.Id(player), N.Get<uint>(player, "Turn"))) return;
             string model = ChatActions.ModelLabel(room.ModelName(N.Id(player)));
             if (model.Length == 0 || string.IsNullOrWhiteSpace(original)) return;
             turnOriginal = original;
             turnApplied = original + "（" + model + "）";
-            label.text = turnApplied;
+            label.Text = turnApplied;
         }
         catch (Exception e)
         {
@@ -50,43 +49,43 @@ internal sealed class ModelNameDisplay
         }
     }
 
-    internal void Poll(NativeAiBridge room, IntPtr lobbyView)
+    internal void Poll(NativeAiBridge room, object lobbyView)
     {
         try
         {
             PollLobby(room, lobbyView);
             var controller = N.Static("TH1_UI.Core.ViewControllerManager", "_bottomRankingController");
-            var view = N.Get<IntPtr>(controller, "_script");
-            var rows = N.Items(N.Get<IntPtr>(view, "Rows"));
-            var current = new HashSet<IntPtr>();
+            var view = N.Get<object>(controller, "_script");
+            var rows = N.Items(N.Get<object>(view, "Rows"));
+            var current = new HashSet<object>();
             foreach (var row in rows)
             {
-                if (row == IntPtr.Zero) continue;
-                var pointer = N.Get<IntPtr>(row, "ForceName");
-                if (pointer == IntPtr.Zero) continue;
+                if (row == null) continue;
+                var pointer = N.Get<object>(row, "ForceName");
+                if (pointer == null) continue;
                 current.Add(pointer);
-                var label = new TextMeshProUGUI(pointer);
-                string original = label.text ?? "";
+                var label = new GameLabel(pointer);
+                string original = label.Text ?? "";
                 if (labels.TryGetValue(pointer, out var previous) && original == previous.Applied)
                 {
                     original = previous.Original;
-                    label.text = original;
+                    label.Text = original;
                 }
                 labels.Remove(pointer);
                 if (!room.ModelsEnabled || N.Get<int>(row, "_entryMode") != 0 ||
-                    !label.gameObject.activeInHierarchy || string.IsNullOrWhiteSpace(original) || original == "???")
+                    !label.Active || string.IsNullOrWhiteSpace(original) || original == "???")
                     continue;
-                var player = N.Get<IntPtr>(row, "_player");
-                if (player == IntPtr.Zero) continue;
+                var player = N.Get<object>(row, "_player");
+                if (player == null) continue;
                 string model = room.ModelName(N.Id(player));
                 if (string.IsNullOrWhiteSpace(model)) continue;
                 // Model IDs are untrusted text; do not allow TextMeshPro markup.
                 model = model.Replace('<', '＜').Replace('>', '＞');
                 string applied = model;
-                label.text = applied;
+                label.Text = applied;
                 labels[pointer] = (original, applied);
             }
-            foreach (var pointer in new List<IntPtr>(labels.Keys))
+            foreach (var pointer in new List<object>(labels.Keys))
                 if (!current.Contains(pointer)) labels.Remove(pointer);
         }
         catch (Exception e)
@@ -96,40 +95,40 @@ internal sealed class ModelNameDisplay
         }
     }
 
-    void PollLobby(NativeAiBridge room, IntPtr view)
+    void PollLobby(NativeAiBridge room, object view)
     {
-        var data = N.Items(N.Get<IntPtr>(view, "_roomMemberRows"));
-        var rows = N.Items(N.Get<IntPtr>(view, "_memberRowList"));
+        var data = N.Items(N.Get<object>(view, "_roomMemberRows"));
+        var rows = N.Items(N.Get<object>(view, "_memberRowList"));
         var models = room.LobbyModelNames();
-        var current = new HashSet<IntPtr>();
+        var current = new HashSet<object>();
         int rowIndex = 0;
         foreach (var item in data)
         {
-            if (item == IntPtr.Zero || N.Get<int>(item, "Type") == 3) continue;
+            if (item == null || N.Get<int>(item, "Type") == 3) continue;
             if (rowIndex >= rows.Count) break;
             var row = rows[rowIndex++];
-            var pointer = N.Get<IntPtr>(row, "NameText");
-            if (pointer == IntPtr.Zero) continue;
+            var pointer = N.Get<object>(row, "NameText");
+            if (pointer == null) continue;
             current.Add(pointer);
-            var label = new TextMeshProUGUI(pointer);
-            string original = label.text ?? "";
+            var label = new GameLabel(pointer);
+            string original = label.Text ?? "";
             if (lobbyLabels.TryGetValue(pointer, out var previous) && original == previous.Applied)
             {
                 original = previous.Original;
-                label.text = original;
+                label.Text = original;
             }
             lobbyLabels.Remove(pointer);
-            var slot = N.Get<IntPtr>(item, "MemberCiv");
-            if (slot == IntPtr.Zero || N.Get<int>(item, "Type") != 4 ||
-                !label.gameObject.activeInHierarchy ||
+            var slot = N.Get<object>(item, "MemberCiv");
+            if (slot == null || N.Get<int>(item, "Type") != 4 ||
+                !label.Active ||
                 !models.TryGetValue(N.Get<int>(slot, "Index"), out var model) ||
                 string.IsNullOrWhiteSpace(model))
                 continue;
             string applied = model.Replace('<', '＜').Replace('>', '＞');
-            label.text = applied;
+            label.Text = applied;
             lobbyLabels[pointer] = (original, applied);
         }
-        foreach (var pointer in new List<IntPtr>(lobbyLabels.Keys))
+        foreach (var pointer in new List<object>(lobbyLabels.Keys))
             if (!current.Contains(pointer)) lobbyLabels.Remove(pointer);
     }
 }

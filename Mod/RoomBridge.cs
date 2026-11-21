@@ -35,8 +35,7 @@ internal sealed class RoomBridge
     public void Poll()
     {
         var controller = N.Static("TH1_UI.Core.ViewControllerManager", "_outsideMultiplayController");
-        var view = N.Get<IntPtr>(controller, "_script");
-        battle.SettingsPoll(view != IntPtr.Zero && N.Get<bool>(view, "_show"));
+        var view = N.Get<object>(controller, "_script");
         native.Poll(RoomFiles.Read<RoomConfig>(root, "room.json"));
         names.Poll(native, view);
     }
@@ -44,6 +43,6 @@ internal sealed class RoomBridge
     public void Dispose()
     {
         native.Dispose();
-        names.Poll(native, IntPtr.Zero);
+        names.Poll(native, null);
     }
 }

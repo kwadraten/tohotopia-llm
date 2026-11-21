@@ -3,10 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Http.Headers;
-using System.Text.Json;
+using TohotopiaMod.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using UnityEngine;
 using TohotopiaShared;
 using N = TohotopiaMod.Native;
 
@@ -19,7 +18,7 @@ public partial class Battle
     readonly Dictionary<uint, (string Message, float At)> recentAmbient = new();
     Task<string> ambientPending;
     CancellationTokenSource ambientCancellation;
-    IntPtr ambientMap;
+    object ambientMap;
     uint ambientPlayer;
     string ambientSession = "", ambientRequestId = "";
     float ambientErrorUntil;
@@ -41,11 +40,11 @@ public partial class Battle
         ambientCancellation = null;
         ambientPending = null;
         ambientPlayer = 0;
-        ambientMap = IntPtr.Zero;
+        ambientMap = null;
         ambientRequestId = "";
     }
 
-    void PollAmbient(IntPtr map)
+    void PollAmbient(object map)
     {
         if (!room.ModelsEnabled)
         {
@@ -53,10 +52,10 @@ public partial class Battle
             return;
         }
         var current = N.Call(map, "get_ivn");
-        uint currentPlayer = current == IntPtr.Zero ? 0 : N.Id(current);
+        uint currentPlayer = current == null ? 0 : N.Id(current);
         if (ambientPending != null && ambientPlayer == currentPlayer)
             CancelAmbient();
-        float now = Time.realtimeSinceStartup;
+        float now = (float)GameRuntime.Now;
         if (now < ambientErrorUntil) return;
         try
         {
@@ -65,12 +64,12 @@ public partial class Battle
                 var task = ambientPending;
                 string id = ambientRequestId;
                 uint pid = ambientPlayer;
-                IntPtr requestMap = ambientMap;
+                object requestMap = ambientMap;
                 ambientPending = null;
                 ambientCancellation?.Dispose();
                 ambientCancellation = null;
                 ambientPlayer = 0;
-                ambientMap = IntPtr.Zero;
+                ambientMap = null;
                 ambientRequestId = "";
                 if (task.IsFaulted || task.IsCanceled)
                     AmbientEvent(map, pid, id, "comm_failed", task.Exception?.GetBaseException().Message ?? "非回合通讯已取消", "warning");
@@ -93,8 +92,8 @@ public partial class Battle
                     else AmbientEvent(map, pid, id, "comm_memory", "已查看可见局势和房间通讯");
                 }
             }
-            var players = N.Items(N.Get<IntPtr>(N.Get<IntPtr>(map, "PlayerMap"), "PlayerDataList"))
-                .Where(player => player != IntPtr.Zero).ToDictionary(N.Id);
+            var players = N.Items(N.Get<object>(N.Get<object>(map, "PlayerMap"), "PlayerDataList"))
+                .Where(player => player != null).ToDictionary(N.Id);
             uint mapId = N.Get<uint>(map, "MapID");
             foreach (uint pid in room.ControlledPlayers())
             {
@@ -134,7 +133,7 @@ public partial class Battle
         }
     }
 
-    void AmbientEvent(IntPtr map, uint pid, string id, string stage, string text, string level = "info")
+    void AmbientEvent(object map, uint pid, string id, string stage, string text, string level = "info")
     {
         try
         {
