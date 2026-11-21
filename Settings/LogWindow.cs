@@ -1,88 +1,90 @@
-using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using Avalonia;
+using Avalonia.Automation;
+using Avalonia.Platform.Storage;
 using Tohotopia;
 using TohotopiaShared;
 namespace Settings;
 
 public sealed partial class SettingsWindow
 {
-    readonly List<AgentEvent> logEvents = new(); readonly Dictionary<string, long> logOffsets = new();
+    readonly List<AgentEvent> logEvents = new();
+    readonly Dictionary<string, long> logOffsets = new();
     List<AgentEvent> visibleLogRows = new();
-    readonly DataGridView logGrid = new() { Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false, AllowUserToDeleteRows = false, RowHeadersVisible = false, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill };
-    readonly ComboBox logSeat = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110 }; readonly CheckBox errorsOnly = new() { Text = "仅警告／错误", AutoSize = true }, logAuto = new() { Text = "自动刷新", Checked = true, AutoSize = true };
-    readonly Label logSummary = new() { Dock = DockStyle.Fill, AutoSize = false }; readonly TextBox engineLog = new() { Dock = DockStyle.Fill, ReadOnly = true, Multiline = true, ScrollBars = ScrollBars.Both, WordWrap = false };
-    readonly System.Windows.Forms.Timer logPoll = new() { Interval = 1500 }; DateTime engineStamp; bool readingLogs, logsRendered;
+    readonly Table logGrid = Ui.Records("Agent 行动", 420);
+    readonly Select logSeat = new() { Name = "LogSeat", Width = 150, Size = ControlSize.Small };
+    readonly Checkbox errorsOnly = new() { Content = "仅警告／错误" }, logAuto = new() { Content = "自动刷新", IsChecked = true };
+    readonly Alert logSummary = Ui.StatusAlert("LogStatus");
+    readonly DispatcherTimer logPoll = new() { Interval = TimeSpan.FromMilliseconds(1500) };
+    bool readingLogs, logsRendered;
     Control BuildLogPage()
     {
-        var page = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1, Padding = new Padding(12) };
-        page.RowStyles.Add(new(SizeType.Absolute, 42));
-        page.RowStyles.Add(new(SizeType.Absolute, 65));
-        page.RowStyles.Add(new(SizeType.Percent, 100));
-        var tools = new FlowLayoutPanel { Dock = DockStyle.Fill };
-        logSeat.Items.Add("全部 Agent");
-        for (int i = 1; i <= 5; i++)
-            logSeat.Items.Add("AI " + i);
+        logGrid.Name = "AgentLogs";
+        errorsOnly.Name = "ErrorsOnly";
+        logSeat.ItemsSource = new[] { "全部 Agent", "AI 1", "AI 2", "AI 3", "AI 4", "AI 5" };
         logSeat.SelectedIndex = 0;
-        var refresh = new Button { Text = "立即刷新", AutoSize = true };
-        refresh.Click += (_, _) => ReadLogs();
-        var clear = new Button { Text = "清空 Agent 行动", AutoSize = true };
-        clear.Click += (_, _) => ClearAgentLogView();
-        var openFolder = new Button { Text = "打开日志文件夹", AutoSize = true };
-        openFolder.Click += (_, _) => OpenLogsFolder();
-        tools.Controls.AddRange(new Control[] { logSeat, errorsOnly, logAuto, refresh, clear, openFolder });
-        page.Controls.Add(tools, 0, 0);
-        page.Controls.Add(logSummary, 0, 1);
-        var tabs = new TabControl { Dock = DockStyle.Fill };
-        var timeline = new TabPage("Agent 行动");
-        timeline.Controls.Add(logGrid);
-        var raw = new TabPage("游戏运行日志");
-        raw.Controls.Add(engineLog);
-        tabs.TabPages.AddRange(new[] { timeline, raw });
-        logPoll.Interval = 1500;
-        page.Controls.Add(tabs, 0, 2);
-        foreach (var c in new[] { ("time", "时间"), ("agent", "Agent／玩家／回合"), ("stage", "阶段"), ("model", "提供商／模型"), ("candidate", "候选"), ("request", "请求 ID"), ("message", "详情") })
-            logGrid.Columns.Add(c.Item1, c.Item2);
-        logGrid.Columns["message"]!.FillWeight = 260;
-        logGrid.Columns["agent"]!.FillWeight = 130;
-        logGrid.Columns["time"]!.FillWeight = 70;
-        logGrid.DefaultCellStyle.WrapMode = DataGridViewTriState.False;
-        logGrid.VirtualMode = true;
-        logGrid.CellValueNeeded += (_, e) =>
+        AutomationProperties.SetName(logSeat, "日志席位");
+        logSummary.Title = "Agent 日志概况";
+        Ui.Status(logSummary, "日志只来自本地 Agent JSONL 文件。点击“查看详情”可查看完整错误、运行结果和推理内容。", AlertTone.Info);
+        static ArcDesignTokenKind? Color(AgentEvent e) => e.Level switch { "error" => ArcDesignTokenKind.Danger, "warning" => ArcDesignTokenKind.Warning, _ => null };
+        Ui.Column<AgentEvent>(logGrid, "时间", e => e.Time.ToLocalTime().ToString("MM-dd HH:mm:ss"), .8, Color);
+        Ui.Column<AgentEvent>(logGrid, "Agent／玩家／回合", e => e.AiSlot > 0 ? $"AI {e.AiSlot} / P{e.PlayerId} / T{e.Turn}" : "系统", 1.3, Color);
+        Ui.Column<AgentEvent>(logGrid, "阶段", e => Stage(e.Stage), 1, Color);
+        Ui.Column<AgentEvent>(logGrid, "提供商／模型", e => e.Provider + " / " + e.Model, 1, Color);
+        Ui.Column<AgentEvent>(logGrid, "候选", e => e.CandidateId, 1, Color);
+        Ui.Column<AgentEvent>(logGrid, "请求 ID", e => e.RequestId, 1, Color);
+        logGrid.Columns.Add(new DataTableColumn("详情", _ => "")
         {
-            if (e.RowIndex < 0 || e.RowIndex >= visibleLogRows.Count) return;
-            var entry = visibleLogRows[e.RowIndex];
-            e.Value = e.ColumnIndex switch
+            Width = new GridLength(1.1, GridUnitType.Star), IsSortable = false,
+            CellTemplate = new FuncDataTemplate<AgentEvent>((row, scope) =>
             {
-                0 => entry.Time.ToLocalTime().ToString("MM-dd HH:mm:ss"),
-                1 => entry.AiSlot > 0 ? $"AI {entry.AiSlot} / P{entry.PlayerId} / T{entry.Turn}" : "系统",
-                2 => Stage(entry.Stage), 3 => entry.Provider + " / " + entry.Model,
-                4 => entry.CandidateId, 5 => entry.RequestId,
-                6 => entry.Message.Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' '), _ => ""
-            };
-        };
-        logGrid.CellFormatting += (_, e) =>
-        {
-            if (e.RowIndex < 0 || e.RowIndex >= visibleLogRows.Count) return;
-            e.CellStyle!.ForeColor = visibleLogRows[e.RowIndex].Level switch { "error" => Color.Firebrick, "warning" => Color.DarkOrange, _ => logGrid.DefaultCellStyle.ForeColor };
-        };
-        logGrid.CellDoubleClick += (_, e) =>
-        {
-            if (e.RowIndex < 0 || e.RowIndex >= visibleLogRows.Count) return;
-            var entry = visibleLogRows[e.RowIndex];
-            using var detail = new Form { Text = "日志详情 · " + Stage(entry.Stage), Width = 850, Height = 600, StartPosition = FormStartPosition.CenterParent, MinimizeBox = false };
-            var content = new TextBox { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = true,
-                Text = $"时间：{entry.Time.ToLocalTime():yyyy-MM-dd HH:mm:ss.fff}  来源：{entry.Source}  级别：{entry.Level}\r\n地图：{entry.MapId}  玩家：{entry.PlayerId}  回合：{entry.Turn}  AI：{entry.AiSlot}  序号：{entry.Sequence}\r\n提供商／模型：{entry.Provider} / {entry.Model}\r\n请求 ID：{entry.RequestId}  候选：{entry.CandidateId}\r\n\r\n{entry.Message}" };
-            detail.Controls.Add(content);
-            detail.ShowDialog(this);
-        };
-        logSeat.SelectedIndexChanged += (_, _) => RenderLogs();
-        errorsOnly.CheckedChanged += (_, _) => RenderLogs();
-        logPoll.Tick += (_, _) => { if (logAuto.Checked) ReadLogs(); };
+                var button = Ui.Button("查看详情", () => _ = ShowLogDetail(row));
+                button.Name = "AgentLogDetail";
+                button.Size = ControlSize.Small;
+                return button;
+            })
+        });
+        logSeat.SelectionChanged += (_, _) => RenderLogs();
+        errorsOnly.IsCheckedChanged += (_, _) => RenderLogs();
+        logPoll.Tick += (_, _) => { if (logAuto.IsChecked == true) ReadLogs(); };
         logPoll.Start();
-        Shown += (_, _) => ReadLogs();
-        FormClosed += (_, _) => logPoll.Stop();
-        return page;
+        return Ui.Page(logSummary, logGrid);
+    }
+    Control[] LogCommands() => [logSeat, errorsOnly, logAuto, Ui.Button("立即刷新", ReadLogs),
+        Ui.Button("清空 Agent 行动", ClearAgentLogView), Ui.Button("打开日志文件夹", OpenLogsFolder)];
+    async Task ShowLogDetail(AgentEvent entry)
+    {
+        if (closed) return;
+        string text = $"时间：{entry.Time.ToLocalTime():yyyy-MM-dd HH:mm:ss.fff}  来源：{entry.Source}  级别：{entry.Level}\r\n阶段：{Stage(entry.Stage)}\r\n地图：{entry.MapId}  玩家：{entry.PlayerId}  回合：{entry.Turn}  AI：{entry.AiSlot}  序号：{entry.Sequence}\r\n提供商／模型：{entry.Provider} / {entry.Model}\r\n请求 ID：{entry.RequestId}  候选：{entry.CandidateId}\r\n\r\n{entry.Message}";
+        if (entry.RequestId.Length > 0)
+        {
+            var related = MergeModelFragments(logEvents.Where(item => item.RequestId == entry.RequestId
+                && item.Stage is "reasoning_delta" or "reasoning_summary" or "model_output_delta")).ToArray();
+            if (related.Length > 0)
+                text += "\r\n\r\n同请求推理与模型输出\r\n" + string.Join("\r\n\r\n", related.Select(item => $"【{Stage(item.Stage)}】\r\n{item.Message}"));
+        }
+        var dialog = new Window
+        {
+            Title = "日志详情 — " + Stage(entry.Stage), Width = 900, Height = 700, MinWidth = 560, MinHeight = 360,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false
+        };
+        var content = Ui.Text(readOnly: true, multiline: true);
+        content.Name = "AgentLogDetailText";
+        content.Text = text;
+        content.VerticalAlignment = VerticalAlignment.Stretch;
+        var close = Ui.Button("关闭", dialog.Close, ButtonVariant.Primary);
+        close.IsDefault = true;
+        close.IsCancel = true;
+        close.HorizontalAlignment = HorizontalAlignment.Right;
+        dialog.Content = new Grid
+        {
+            RowDefinitions = new RowDefinitions("*,Auto"),
+            Margin = new Thickness(20),
+            Children = { content, close }
+        };
+        Grid.SetRow(close, 1);
+        await dialog.ShowDialog(this);
     }
     void ReadLogs()
     {
@@ -123,7 +125,7 @@ public sealed partial class SettingsWindow
                     {
                         try
                         {
-                            var e = JsonSerializer.Deserialize<AgentEvent>(line, RoomFiles.Json);
+                            var e = JsonSerializer.Deserialize(line, SettingsJson.Type<AgentEvent>(RoomFiles.Json));
                             if (e != null)
                             {
                                 logEvents.Add(e);
@@ -143,19 +145,12 @@ public sealed partial class SettingsWindow
                 RenderLogs();
                 logsRendered = true;
             }
-            string pathRaw = Path.GetFullPath(Path.Combine(Files.Root, "..", "..", "..", "LogOutput.log"));
-            if (File.Exists(pathRaw) && File.GetLastWriteTimeUtc(pathRaw) != engineStamp)
-            {
-                engineStamp = File.GetLastWriteTimeUtc(pathRaw);
-                using var raw = new FileStream(pathRaw, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-                raw.Position = Math.Max(0, raw.Length - 256 * 1024);
-                using var reader = new StreamReader(raw, Encoding.UTF8);
-                engineLog.Text = reader.ReadToEnd();
-                engineLog.SelectionStart = engineLog.TextLength;
-                engineLog.ScrollToCaret();
-            }
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { logSummary.Text = "日志读取失败：" + e.Message; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            logSummary.Title = "日志读取失败";
+            Ui.Status(logSummary, e.Message, AlertTone.Danger);
+        }
         finally { readingLogs = false; }
     }
     void ClearAgentLogView()
@@ -172,18 +167,19 @@ public sealed partial class SettingsWindow
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            logSummary.Text = "清空视图失败：" + e.Message;
+            logSummary.Title = "清空视图失败";
+            Ui.Status(logSummary, e.Message, AlertTone.Danger);
         }
     }
-    void OpenLogsFolder()
+    async void OpenLogsFolder()
     {
         string path = Path.GetFullPath(Path.Combine(Files.Root, "logs"));
         try
         {
             Directory.CreateDirectory(path);
-            Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+            await Launcher.LaunchDirectoryInfoAsync(new DirectoryInfo(path));
         }
-        catch (Exception e) { MessageBox.Show(this, "无法打开日志文件夹：" + e.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        catch (Exception e) { await Ui.Message(this, "无法打开日志文件夹：" + e.Message, Title ?? "日志"); }
     }
     void RenderLogs()
     {
@@ -194,12 +190,12 @@ public sealed partial class SettingsWindow
         if (logSeat.SelectedIndex > 0)
             filtered = filtered.Where(e => e.AiSlot == logSeat.SelectedIndex);
         var selected = filtered.ToList();
-        if (errorsOnly.Checked)
+        if (errorsOnly.IsChecked == true)
             filtered = filtered.Where(e => e.Level is "warning" or "error");
         visibleLogRows = MergeModelFragments(filtered).OrderByDescending(e => e.Time).Take(600).ToList();
-        logGrid.RowCount = visibleLogRows.Count;
-        logGrid.Invalidate();
-        logSummary.Text = $"最近已加载 {logEvents.Count} 条；所选 Agent：模型请求 {selected.Count(e => e.Stage == "model_request")}，思考片段 {selected.Count(e => e.Stage is "reasoning_summary" or "reasoning_delta")}，有效决策 {selected.Count(e => e.Stage == "model_decision")}，游戏执行 {selected.Count(e => e.Stage == "executed")}，聊天发送 {selected.Count(e => e.Stage == "message_sent")}，模型结束回合 {selected.Count(e => e.Stage == "end_turn")}，失败 {selected.Count(e => e.Level == "error")}\n只有‘游戏执行’是动作落地记录；‘有效决策’仅说明模型返回了合法候选。原生 AI 行为不计为模型行动。";
+        logGrid.ItemsSource = visibleLogRows;
+        logSummary.Title = "Agent 日志概况";
+        Ui.Status(logSummary, $"最近已加载 {logEvents.Count} 条；所选 Agent：模型请求 {selected.Count(e => e.Stage == "model_request")}，思考片段 {selected.Count(e => e.Stage is "reasoning_summary" or "reasoning_delta")}，有效决策 {selected.Count(e => e.Stage == "model_decision")}，游戏执行 {selected.Count(e => e.Stage == "executed")}，聊天发送 {selected.Count(e => e.Stage == "message_sent")}，模型结束回合 {selected.Count(e => e.Stage == "end_turn")}，失败 {selected.Count(e => e.Level == "error")}\n只有‘游戏执行’是动作落地记录；‘有效决策’仅说明模型返回了合法候选。原生 AI 行为不计为模型行动。", selected.Any(e => e.Level == "error") ? AlertTone.Warning : AlertTone.Info);
     }
     static IEnumerable<AgentEvent> MergeModelFragments(IEnumerable<AgentEvent> events)
     {
@@ -227,5 +223,5 @@ public sealed partial class SettingsWindow
             rows[group.Row] = rows[group.Row] with { Message = group.Text.ToString() };
         return rows;
     }
-    static string Stage(string s) => s switch { "reasoning_delta" => "思考", "model_output_delta" => "模型输出", "tool_call" => "查询规则", "tool_result" => "规则结果", "game_request" => "游戏提交请求", "model_request" => "模型开始决策", "reasoning_summary" => "服务端推理摘要", "model_decision" => "模型有效决策", "model_failed" => "模型请求失败", "json_retry" => "JSON 重新生成", "comm_request" => "非回合局势巡检", "comm_reply" => "非回合通讯决策", "comm_sent" => "通讯消息已发送", "comm_rejected" => "通讯消息发送失败", "comm_memory" => "战术记忆已更新", "comm_failed" => "非回合通讯失败", "plan_received" => "收到动作序列", "plan_blocked" => "序列执行受阻", "executed" => "游戏执行", "message_sent" => "聊天已发送", "message_rejected" => "聊天发送被拒绝", "end_turn" => "模型结束回合", "candidate_stale" => "候选失效", "budget_end" => "动作上限结束", "turn_start" => "AI 回合开始", "fallback" => "停止／回退原 AI", "control_enabled" => "启用模型接管", "auth_saved" => "凭据已保存", "auth_refresh_failed" => "凭据刷新失败", _ => s };
+    static string Stage(string s) => s switch { "reasoning_delta" => "思考", "model_output_delta" => "模型输出", "tool_call" => "查询规则", "tool_result" => "规则结果", "game_request" => "游戏提交请求", "model_request" => "模型开始决策", "reasoning_summary" => "服务端推理摘要", "model_decision" => "模型有效决策", "model_failed" => "模型请求失败", "json_retry" => "JSON 重新生成", "comm_request" => "非回合局势巡检", "comm_reply" => "非回合通讯决策", "comm_sent" => "通讯消息已发送", "comm_rejected" => "通讯消息发送失败", "comm_memory" => "战术记忆已更新", "comm_failed" => "非回合通讯失败", "plan_received" => "收到动作序列", "plan_blocked" => "序列执行受阻", "executed" => "游戏执行", "message_sent" => "聊天已发送", "message_rejected" => "聊天发送被拒绝", "end_turn" => "模型结束回合", "candidate_stale" => "候选失效", "budget_end" => "动作上限结束", "turn_start" => "AI 回合开始", "fallback" => "停止／回退原 AI", "control_enabled" => "启用模型接管", "auth_saved" => "凭据已保存", "auth_refresh_failed" => "凭据刷新失败", "ping" => "连通性测试", _ => s };
 }

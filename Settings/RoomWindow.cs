@@ -1,128 +1,179 @@
+using Avalonia;
+using Avalonia.Automation;
 using TohotopiaShared;
 using Tohotopia;
 namespace Settings;
 
 public sealed partial class SettingsWindow
 {
-    readonly NumericUpDown aiCount = new() { Minimum = 1, Maximum = 4, Value = 2 };
-    readonly CheckBox models = new() { Text = "对局开始时自动启用模型", Checked = true };
-    readonly DataGridView seats = new() { Dock = DockStyle.Fill, AllowUserToAddRows = false, AllowUserToDeleteRows = false, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, RowHeadersVisible = false };
-    readonly TextBox actionStatus = new() { ReadOnly = true, Dock = DockStyle.Fill };
-    readonly TextBox roomStatus = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill };
-    readonly System.Windows.Forms.Timer roomPoll = new() { Interval = 1000 };
+    readonly NumberField aiCount = new() { Name = "SeatCount", Minimum = 1, Maximum = 4, Value = 2, Step = 1, MaximumFractionDigits = 0, UseGrouping = false, MaxWidth = 220, HorizontalAlignment = HorizontalAlignment.Left };
+    readonly Checkbox models = new() { Content = "对局开始时自动启用模型", IsChecked = true };
+    readonly StackPanel seats = new() { Spacing = 4 };
+    readonly List<SeatControls> seatRows = new();
+    const string SeatColumns = "36,*,2*,112";
+    readonly Alert actionStatus = Ui.StatusAlert("ActionStatus"), roomStatus = Ui.StatusAlert("RoomStatus");
+    readonly DispatcherTimer roomPoll = new() { Interval = TimeSpan.FromSeconds(1) };
+
     Control BuildRoomPage()
     {
-        var panel = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(15), ColumnCount = 2, AutoScroll = true };
-        panel.ColumnStyles.Add(new(SizeType.Absolute, 140));
-        panel.ColumnStyles.Add(new(SizeType.Percent, 100));
-        void Row(string label, Control control, int h = 36)
-        {
-            int r = panel.RowCount++;
-            panel.RowStyles.Add(new(SizeType.Absolute, h));
-            panel.Controls.Add(new Label { Text = label, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, r);
-            control.Dock = DockStyle.Fill;
-            panel.Controls.Add(control, 1, r);
-        }
-        Row("使用方式", new Label { Text = "1. 在账号管理中连接提供商。  2. 配置下方模型并保存。\r\n3. 由房主在游戏内创建 Steam 房间、添加 AI，并在游戏内开始对局。", TextAlign = ContentAlignment.MiddleLeft }, 68);
-        Row("席位对应", new Label { Text = "按游戏中可接管的 AI 席位顺序，从上到下依次分配模型。房间中的 AI 数量须不少于配置数量；文明、队伍和地图均在游戏中设置。", TextAlign = ContentAlignment.MiddleLeft }, 68);
-        Row("非回合通讯", new Label { Text = "模型在回合外收到新消息时回应，会额外调用模型。公共消息由房主标注 AI 席位代发；同盟消息仅发送给 AI 的真人盟友。", TextAlign = ContentAlignment.MiddleLeft }, 72);
-        Row("接管数量", aiCount);
-        seats.Columns.Add(new DataGridViewTextBoxColumn { Name = "slot", HeaderText = "接管顺序", ReadOnly = true, FillWeight = 35 });
-        seats.Columns.Add(new DataGridViewComboBoxColumn { Name = "provider", HeaderText = "提供商", FillWeight = 90 });
-        seats.Columns.Add(new DataGridViewComboBoxColumn { Name = "model", HeaderText = "模型", FillWeight = 160 });
-        seats.Columns.Add(new DataGridViewComboBoxColumn { Name = "reasoning", HeaderText = "推理", DataSource = new[] { "default" }, FillWeight = 65 });
-        seats.DataError += (_, e) => { e.ThrowException = false; };
-        seats.CurrentCellDirtyStateChanged += (_, _) => { if (seats.IsCurrentCellDirty) seats.CommitEdit(DataGridViewDataErrorContexts.Commit); };
-        seats.CellValueChanged += async (_, e) => { if (e.RowIndex >= 0 && !refreshingSeats && catalogProviders.Count > 0 && (e.ColumnIndex == seats.Columns["provider"].Index || e.ColumnIndex == seats.Columns["model"].Index)) { await RefreshSeatModels(); } };
-        Row("模型分配", seats, 210);
-        Row("模型控制", models);
-        var buttons = new FlowLayoutPanel();
-        Button Button(string name, Action action)
-        {
-            var b = new Button { Text = name, AutoSize = true };
-            b.Click += (_, _) => { try { action(); } catch (Exception e) { actionStatus.Text = e.Message; } };
-            buttons.Controls.Add(b);
-            return b;
-        }
-        Button("保存接管配置", PublishRoom);
-        Button("启用模型接管", () => Command("models"));
-        Button("恢复原生 AI", () => Command("native"));
-        Button("停用接管配置", StopRoom);
-        Row("接管控制", buttons, 72);
-        Row("控制说明", new Label { Text = "启用模型／恢复原生 AI 可在对局中切换；停用配置会结束接管。修改模型配置前请先恢复原生 AI。", TextAlign = ContentAlignment.MiddleLeft }, 58);
-        Row("操作提示", actionStatus);
-        Row("房间状态", roomStatus, 100);
+        models.Name = "UseModels";
+        actionStatus.Name = "ActionStatus";
+        roomStatus.Name = "RoomStatus";
+        var guide = Ui.Form();
+        Ui.Row(guide, "使用方式", Ui.Label("1. 在账号管理中连接提供商。  2. 配置下方模型并保存。\n3. 由房主在游戏内创建 Steam 房间、添加 AI，并在游戏内开始对局。"));
+        Ui.Row(guide, "席位对应", Ui.Label("按游戏中可接管的 AI 席位顺序，从上到下依次分配模型。房间中的 AI 数量须不少于配置数量；文明、队伍和地图均在游戏中设置。"));
+        Ui.Row(guide, "非回合通讯", Ui.Label("模型在回合外收到新消息时回应，会额外调用模型。公共消息由房主标注 AI 席位代发；同盟消息仅发送给 AI 的真人盟友。"));
+        var seatsForm = Ui.Form();
+        Ui.Row(seatsForm, "接管数量", aiCount);
+        Ui.Row(seatsForm, "模型分配", seats);
+        Ui.Row(seatsForm, "模型控制", models);
+        var status = Ui.Form();
+        Ui.Row(status, "房间状态", roomStatus);
+        Ui.Row(status, "控制说明", Ui.Label("启用模型／恢复原生 AI 可在对局中切换；停用配置会结束接管。修改模型配置前请先恢复原生 AI。", true));
+        Ui.Row(status, "操作提示", actionStatus);
+        var help = new Accordion { ExpandedIndex = -1, Margin = new Thickness(0, 0, 0, 2) };
+        help.Items.Add(new AccordionItem { Header = "使用说明", Content = guide });
+        var panel = Ui.Page(help, Ui.Section("AI 席位", seatsForm), Ui.Section("状态与操作", status));
         aiCount.ValueChanged += async (_, _) => { ResizeSeats(); if (catalogProviders.Count > 0) await RefreshSeatModels(); };
         ResizeSeats();
         var saved = RoomFiles.Read<RoomConfig>(Files.Root, "room.json");
         if (saved?.NativeLobby == true && saved.AIs.Count > 0)
         {
-            models.Checked = saved.UseModels;
-            aiCount.Value = Math.Clamp(saved.AIs.Count, (int)aiCount.Minimum, (int)aiCount.Maximum);
+            models.IsChecked = saved.UseModels;
+            aiCount.Value = Math.Clamp(saved.AIs.Count, 1, 4);
             ResizeSeats();
-            for (int i = 0; i < seats.Rows.Count; i++)
+            for (int i = 0; i < seatRows.Count; i++)
             {
-                var a = saved.AIs[i];
-                seats.Rows[i].SetValues(i + 1, a.Provider, a.Model, a.Reasoning);
+                seatRows[i].ProviderId = saved.AIs[i].Provider;
+                seatRows[i].ModelId = saved.AIs[i].Model;
+                seatRows[i].Reasoning = saved.AIs[i].Reasoning;
             }
         }
-        roomStatus.Text = saved != null && !saved.NativeLobby
+        bool legacy = saved != null && !saved.NativeLobby;
+        roomStatus.Title = legacy ? "需要更新旧版配置" : "等待保存接管配置";
+        Ui.Status(roomStatus, legacy
             ? "检测到旧版虚拟房间配置，请重新选择模型并保存接管配置。"
-            : "请配置模型并保存，再由房主在游戏中创建 Steam 房间、添加 AI 并开始对局。";
-        roomPoll.Tick += (_, _) => { try { var s = RoomFiles.Read<RoomStatus>(Files.Root, "room-status.json"); if (s != null) roomStatus.Text = s.Message + $"\r\n状态：{s.State} · 可用／已接管 AI：{s.AIPlayers} · 模型接管：{(s.ModelsEnabled ? "启用" : "未启用")}"; } catch { } };
+            : "请配置模型并保存，再由房主在游戏中创建 Steam 房间、添加 AI 并开始对局。", legacy ? AlertTone.Warning : AlertTone.Info);
+        actionStatus.Title = "接管操作";
+        Ui.Status(actionStatus, "接管命令已移至窗口顶部 Ribbon。操作结果会完整显示在这里。", AlertTone.Info);
+        roomPoll.Tick += (_, _) =>
+        {
+            try
+            {
+                var state = RoomFiles.Read<RoomStatus>(Files.Root, "room-status.json");
+                if (state != null)
+                {
+                    roomStatus.Title = "房间状态已更新";
+                    Ui.Status(roomStatus, state.Message + $"\n状态：{state.State} · 可用／已接管 AI：{state.AIPlayers} · 模型接管：{(state.ModelsEnabled ? "启用" : "未启用")}", state.ModelsEnabled ? AlertTone.Success : AlertTone.Info);
+                }
+            }
+            catch (Exception e) when (e is IOException or System.Text.Json.JsonException or UnauthorizedAccessException) { }
+        };
         roomPoll.Start();
-        FormClosed += (_, _) => roomPoll.Stop();
         return panel;
     }
+
+    Control[] RoomCommands()
+    {
+        Button CommandButton(string name, Action action, ButtonVariant variant = ButtonVariant.Secondary) => Ui.Button(name, () =>
+        {
+            try { action(); }
+            catch (Exception e)
+            {
+                actionStatus.Title = "接管操作失败";
+                Ui.Status(actionStatus, e.Message, AlertTone.Danger);
+            }
+        }, variant);
+        return [CommandButton("保存接管配置", PublishRoom, ButtonVariant.Primary), CommandButton("启用模型接管", () => Command("models")),
+            CommandButton("恢复原生 AI", () => Command("native")), CommandButton("停用接管配置", StopRoom)];
+    }
+
     void ResizeSeats()
     {
-        while (seats.Rows.Count > (int)aiCount.Value)
-            seats.Rows.RemoveAt(seats.Rows.Count - 1);
-        while (seats.Rows.Count < (int)aiCount.Value)
+        int count = (int)aiCount.Value;
+        while (seatRows.Count > count) seatRows.RemoveAt(seatRows.Count - 1);
+        while (seatRows.Count < count)
         {
-            int i = seats.Rows.Count;
-            seats.Rows.Add(i + 1, "openai", "", "default");
+            var seat = new SeatControls(seatRows.Count + 1);
+            seat.Provider.SelectionChanged += async (_, _) =>
+            {
+                if (refreshingSeats || seat.Provider.SelectedItem is not CatalogProvider selected) return;
+                seat.ProviderId = selected.Id;
+                await RefreshSeatModels();
+            };
+            seat.Model.SelectionChanged += async (_, _) =>
+            {
+                if (refreshingSeats || seat.Model.SelectedItem is not CatalogModel selected) return;
+                seat.ModelId = selected.Id;
+                await RefreshSeatModels();
+            };
+            seat.Effort.SelectionChanged += (_, _) => { if (!refreshingSeats && seat.Effort.SelectedItem is string value) seat.Reasoning = value; };
+            seatRows.Add(seat);
         }
+        seats.Children.Clear();
+        var header = new Grid { ColumnDefinitions = new ColumnDefinitions(SeatColumns), ColumnSpacing = 8 };
+        int col = 0;
+        foreach (string caption in new[] { "顺序", "提供商", "模型", "推理" })
+        {
+            var label = Ui.Label(caption); Grid.SetColumn(label, col++); header.Children.Add(label);
+        }
+        seats.Children.Add(header);
+        foreach (var seat in seatRows) seats.Children.Add(seat.View);
     }
+
     void PublishRoom()
     {
-        var currentRoom = RoomFiles.Read<RoomStatus>(Files.Root, "room-status.json");
-        if (currentRoom?.ModelsEnabled == true)
+        if (RoomFiles.Read<RoomStatus>(Files.Root, "room-status.json")?.ModelsEnabled == true)
             throw new InvalidOperationException("请先恢复原生 AI，再修改接管配置。");
-        seats.EndEdit();
         var ai = new List<AISeat>();
-        foreach (DataGridViewRow row in seats.Rows)
+        foreach (var row in seatRows)
         {
-            string providerId = row.Cells["provider"].Value?.ToString() ?? "";
-            string modelId = row.Cells["model"].Value?.ToString() ?? "";
-            if (!catalogProviders.Any(p => p.Id == providerId && p.ConnectionSupported) || !modelCache.TryGetValue(providerId, out var available) || !available.Any(m => m.Id == modelId))
+            if (!catalogProviders.Any(p => p.Id == row.ProviderId && p.ConnectionSupported)
+                || !modelCache.TryGetValue(row.ProviderId, out var available) || !available.Any(m => m.Id == row.ModelId))
                 throw new InvalidOperationException("请先从模型目录选择可连接的提供商和模型");
-            ai.Add(new()
-            {
-                Provider = row.Cells["provider"].Value?.ToString() ?? "",
-                Model = row.Cells["model"].Value?.ToString()?.Trim() ?? "",
-                Reasoning = row.Cells["reasoning"].Value?.ToString() ?? "default"
-            });
+            ai.Add(new() { Provider = row.ProviderId, Model = row.ModelId.Trim(), Reasoning = row.Reasoning });
         }
-        var config = new RoomConfig { NativeLobby = true, Published = true, UseModels = models.Checked, AIs = ai };
+        var config = new RoomConfig { NativeLobby = true, Published = true, UseModels = models.IsChecked == true, AIs = ai };
         config.Validate();
         RoomFiles.Write(Files.Root, "room.json", config);
-        actionStatus.Text = "接管配置已保存；请由房主在游戏中创建 Steam 房间、添加 AI 并开始对局。";
+        actionStatus.Title = "接管配置已保存";
+        Ui.Status(actionStatus, "请由房主在游戏中创建 Steam 房间、添加 AI 并开始对局。", AlertTone.Success);
     }
     void StopRoom()
     {
         var config = RoomFiles.Read<RoomConfig>(Files.Root, "room.json");
-        if (config?.NativeLobby == true)
-            RoomFiles.Write(Files.Root, "room.json", config with { Published = false, Revision = Guid.NewGuid().ToString("N") });
-        actionStatus.Text = "已停止接管，原生房间不受影响。";
+        if (config?.NativeLobby == true) RoomFiles.Write(Files.Root, "room.json", config with { Published = false, Revision = Guid.NewGuid().ToString("N") });
+        actionStatus.Title = "接管配置已停用";
+        Ui.Status(actionStatus, "已停止接管，原生房间不受影响。", AlertTone.Success);
     }
     void Command(string action)
     {
         var config = RoomFiles.Read<RoomConfig>(Files.Root, "room.json");
-        if (config?.NativeLobby != true || !config.Published)
-            throw new InvalidOperationException("请先保存接管配置，再切换 AI 控制方式。");
+        if (config?.NativeLobby != true || !config.Published) throw new InvalidOperationException("请先保存接管配置，再切换 AI 控制方式。");
         RoomFiles.Write(Files.Root, "room-command.json", new RoomCommand(Guid.NewGuid().ToString("N"), action));
-        actionStatus.Text = action == "models" ? "已请求启用模型接管，等待游戏响应。" : "已请求恢复原生 AI，等待游戏响应。";
+        actionStatus.Title = action == "models" ? "已请求启用模型接管" : "已请求恢复原生 AI";
+        Ui.Status(actionStatus, "命令已保存，等待游戏响应。", AlertTone.Info);
+    }
+
+    sealed class SeatControls
+    {
+        internal string ProviderId = "openai", ModelId = "", Reasoning = "default";
+        internal readonly Select Provider, Model, Effort;
+        internal readonly Grid View = new() { ColumnDefinitions = new ColumnDefinitions(SeatColumns), ColumnSpacing = 8 };
+        internal SeatControls(int slot)
+        {
+            Provider = new Select { Name = $"Seat{slot}Provider", TextSelector = p => (p as CatalogProvider)?.Name };
+            Model = new Select { Name = $"Seat{slot}Model", TextSelector = m => (m as CatalogModel)?.Id };
+            Effort = new Select { Name = $"Seat{slot}Reasoning", ItemsSource = new[] { "default" }, SelectedIndex = 0 };
+            var controls = new Control[] { Ui.Label(slot.ToString()), Provider, Model, Effort };
+            for (int i = 0; i < controls.Length; i++)
+            {
+                Grid.SetColumn(controls[i], i);
+                controls[i].HorizontalAlignment = HorizontalAlignment.Stretch;
+                if (controls[i] is Select select) { select.MinWidth = 0; select.Size = ControlSize.Small; }
+                AutomationProperties.SetName(controls[i], $"AI {slot} " + new[] { "顺序", "提供商", "模型", "推理" }[i]);
+                View.Children.Add(controls[i]);
+            }
+        }
     }
 }
-

@@ -6,63 +6,59 @@ public sealed partial class SettingsWindow
 {
     List<CatalogProvider> catalogProviders = new();
     readonly Dictionary<string, List<CatalogModel>> modelCache = new();
-    bool refreshingSeats;
+    bool refreshingSeats, refreshPending;
     static string[] Efforts(CatalogModel? model) => model?.Efforts.Length > 0 ? model.Efforts : new[] { "default" };
     static string CatalogProviderId(string p) => p switch { "grok" => "xai", "kimi" => "kimi-code-plan-global", _ => p };
     async Task<List<CatalogModel>> GetModels(string p)
     {
         p = CatalogProviderId(p);
-        if (modelCache.TryGetValue(p, out var found))
-            return found;
+        if (modelCache.TryGetValue(p, out var found)) return found;
         using var response = await http.GetAsync("/catalog/" + Uri.EscapeDataString(p) + "/models");
-        if (!response.IsSuccessStatusCode)
-            throw new InvalidOperationException(await response.Content.ReadAsStringAsync());
-        var list = await response.Content.ReadFromJsonAsync<List<CatalogModel>>(Files.Json) ?? new();
+        if (!response.IsSuccessStatusCode) throw new InvalidOperationException(await response.Content.ReadAsStringAsync());
+        var list = await response.Content.ReadFromJsonAsync(SettingsJson.Type<List<CatalogModel>>()) ?? new();
         modelCache[p] = list;
         return list;
     }
     async Task LoadCatalog()
     {
-        catalogProviders = await http.GetFromJsonAsync<List<CatalogProvider>>("/catalog/providers", Files.Json) ?? new();
-        provider.DisplayMember = "Name";
-        provider.ValueMember = "Id";
-        provider.DataSource = catalogProviders;
-        var column = (DataGridViewComboBoxColumn)seats.Columns["provider"];
-        column.DisplayMember = "Name";
-        column.ValueMember = "Id";
-        column.DataSource = catalogProviders.Where(p => p.ConnectionSupported).ToList();
+        catalogProviders = await http.GetFromJsonAsync("/catalog/providers", SettingsJson.Type<List<CatalogProvider>>()) ?? new();
+        provider.ItemsSource = catalogProviders;
         await RefreshSeatModels();
     }
     async Task RefreshSeatModels()
     {
-        if (refreshingSeats)
-            return;
+        refreshPending = true;
+        if (refreshingSeats) return;
         refreshingSeats = true;
         try
         {
-            foreach (DataGridViewRow row in seats.Rows)
+            do
             {
-                string p = CatalogProviderId(row.Cells["provider"].Value?.ToString() ?? "openai");
-                if (row.Cells["provider"].Value?.ToString() != p)
-                    row.Cells["provider"].Value = p;
-                var list = await GetModels(p);
-                var cell = (DataGridViewComboBoxCell)row.Cells["model"];
-                string selected = cell.Value?.ToString() ?? "";
-                cell.DisplayMember = "Id";
-                cell.ValueMember = "Id";
-                cell.Value = null;
-                cell.DataSource = list;
-                var model = list.FirstOrDefault(m => m.Id == selected) ?? list.FirstOrDefault();
-                cell.Value = model?.Id;
-                var effort = (DataGridViewComboBoxCell)row.Cells["reasoning"];
-                string selectedEffort = effort.Value?.ToString() ?? "";
-                string[] levels = Efforts(model);
-                effort.Value = null;
-                effort.DataSource = levels;
-                effort.Value = levels.Contains(selectedEffort) ? selectedEffort : levels[0];
-            }
+                refreshPending = false;
+                foreach (var row in seatRows.ToArray())
+                {
+                    string p = CatalogProviderId(row.ProviderId);
+                    var list = await GetModels(p);
+                    if (!seatRows.Contains(row)) continue;
+                    row.ProviderId = p;
+                    row.Provider.ItemsSource = catalogProviders.Where(item => item.ConnectionSupported).ToArray();
+                    row.Provider.SelectedItem = catalogProviders.FirstOrDefault(item => item.Id == p && item.ConnectionSupported);
+                    var model = list.FirstOrDefault(m => m.Id == row.ModelId) ?? list.FirstOrDefault();
+                    row.Model.ItemsSource = list;
+                    row.Model.SelectedItem = model;
+                    row.ModelId = model?.Id ?? "";
+                    string[] levels = Efforts(model);
+                    row.Reasoning = levels.Contains(row.Reasoning) ? row.Reasoning : levels[0];
+                    row.Effort.ItemsSource = levels;
+                    row.Effort.SelectedItem = row.Reasoning;
+                }
+            } while (refreshPending && !closed);
         }
-        catch (Exception e) { roomStatus.Text = "模型目录读取失败：" + e.Message; }
+        catch (Exception e)
+        {
+            roomStatus.Title = "模型目录读取失败";
+            Ui.Status(roomStatus, e.Message, AlertTone.Danger);
+        }
         finally { refreshingSeats = false; }
     }
 }

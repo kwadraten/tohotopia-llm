@@ -1,0 +1,6 @@
+Mode: built-in imagegen edit; background transparency preserved.
+Source: D:/code/mod-intro/video/public/media/img/deepseek-pawn.png
+Output: app.png; app.ico converted to 16, 24, 32, 48, 64, 128 and 256 px.
+
+Prompt:
+Use case: identity-preserve. Edit target: the attached low-poly blue-haired maid character. Create a square application icon by tightly cropping ONLY her face and surrounding blue bangs. Preserve the exact original polygon shapes, colors, smiling mouth, blue eyes, head tilt, and expression. No redesign, no redraw, no new details. Exclude torso, hands, dress, legs and long hair outside the face framing. Face fills most of the square with a small margin. Preserve transparent background. No text, no border, no badge.

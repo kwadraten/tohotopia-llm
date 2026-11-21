@@ -1,0 +1,25 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:arc="https://github.com/AIDotNet/TKCode.Arc"
+             x:Class="Settings.App">
+  <Application.Styles>
+    <Style Selector="Window">
+      <Setter Property="Icon" Value="/Assets/app.ico" />
+      <Setter Property="Background" Value="{arc:ArcDesignTokenResource Background}" />
+      <Setter Property="Foreground" Value="{arc:ArcDesignTokenResource Foreground}" />
+      <Setter Property="FontFamily" Value="{arc:ArcDesignTokenResource BodyFontFamily}" />
+      <Setter Property="FontSize" Value="{arc:ArcDesignTokenResource TypeSM}" />
+    </Style>
+    <Style Selector="arc|Select">
+      <Setter Property="Placeholder" Value="请选择" />
+    </Style>
+    <Style Selector="arc|NumberField">
+      <Setter Property="IsLimitHintEnabled" Value="False" />
+      <Setter Property="IncreaseText" Value="增加" />
+      <Setter Property="DecreaseText" Value="减少" />
+    </Style>
+    <Style Selector="arc|Button">
+      <Setter Property="IsPressScaleEnabled" Value="False" />
+    </Style>
+  </Application.Styles>
+</Application>
