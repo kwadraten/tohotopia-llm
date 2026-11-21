@@ -15,6 +15,7 @@
 /steamcmd/
 # Release archives produced by packaging scripts.
 *.zip
+*.zip.sha256
 
 # Local configuration and secrets
 .env
