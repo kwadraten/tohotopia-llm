@@ -11,7 +11,10 @@
 /validation/
 /research/
 *.log
+# SteamCMD install: config.vdf, userdata and logs carry login state/tokens.
 /steamcmd/
+# Release archives produced by packaging scripts.
+*.zip
 
 # Local configuration and secrets
 .env
